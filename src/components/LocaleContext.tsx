@@ -32,6 +32,51 @@ const dictionary: Record<string, { en: string; ar: string }> = {
   "category.sides": { en: "Sides", ar: "الأطباق الجانبية" },
   "category.drinks": { en: "Drinks", ar: "المشروبات" },
   "menu.add": { en: "Add", ar: "إضافة" },
+
+  // Cart
+  "cart.empty": { en: "Your cart is empty.", ar: "سلتك فارغة." },
+  "cart.browse": { en: "Browse restaurants", ar: "تصفح المطاعم" },
+  "cart.title": { en: "Your order", ar: "طلبك" },
+  "cart.trust": { en: "No surge. Flat fee. Always shown upfront.", ar: "بدون رسوم ذروة. رسوم ثابتة. تظهر دائماً مسبقاً." },
+  "cart.subtotal": { en: "Subtotal", ar: "المجموع الفرعي" },
+  "cart.deliveryFee": { en: "Delivery fee (flat)", ar: "رسوم التوصيل (ثابتة)" },
+  "cart.serviceFee": { en: "Service fee", ar: "رسوم الخدمة" },
+  "cart.total": { en: "Total", ar: "الإجمالي" },
+  "cart.checkout": { en: "Go to checkout", ar: "إتمام الطلب" },
+
+  // Checkout
+  "checkout.empty": { en: "Your cart is empty — add something from a restaurant first.", ar: "سلتك فارغة — أضف شيئاً من مطعم أولاً." },
+  "checkout.title": { en: "Checkout", ar: "إتمام الطلب" },
+  "checkout.address": { en: "Delivery address", ar: "عنوان التوصيل" },
+  "checkout.payment": { en: "Payment method", ar: "طريقة الدفع" },
+  "checkout.card": { en: "Card", ar: "بطاقة" },
+  "checkout.cash": { en: "Cash on delivery", ar: "الدفع عند الاستلام" },
+  "checkout.demoNote": {
+    en: "Demo checkout — no real payment is processed. A production build wires this to a PSP supporting mada, Jaywan, NAPS or KNET depending on market.",
+    ar: "دفع تجريبي — لا تتم معالجة أي دفعة حقيقية. في الإصدار النهائي سيتم ربطه ببوابة دفع تدعم مدى أو جيوان أو NAPS أو كي نت حسب السوق.",
+  },
+  "checkout.placing": { en: "Placing order…", ar: "جارٍ إرسال الطلب…" },
+  "checkout.place": { en: "Place order", ar: "إرسال الطلب" },
+
+  // Order tracking
+  "order.title": { en: "Order", ar: "الطلب" },
+  "order.declined": { en: "Order was declined by the restaurant", ar: "تم رفض الطلب من قبل المطعم" },
+  "order.cancelled": { en: "Order was cancelled", ar: "تم إلغاء الطلب" },
+  "order.autoRefund": { en: "A full refund is issued automatically for this case.", ar: "يتم إصدار استرداد كامل تلقائياً في هذه الحالة." },
+  "order.riderAssigned": { en: "Rider", ar: "السائق" },
+  "order.riderNotAssigned": { en: "Rider not yet assigned", ar: "لم يتم تعيين سائق بعد" },
+  "order.arriving": { en: "Arriving in ~{mins} minutes", ar: "الوصول خلال ~{mins} دقيقة" },
+  "order.riderPending": {
+    en: "A rider will be assigned once the restaurant marks your order ready",
+    ar: "سيتم تعيين سائق بمجرد أن يضع المطعم طلبك كجاهز",
+  },
+  "order.step.placed": { en: "Order placed", ar: "تم استلام الطلب" },
+  "order.step.accepted": { en: "Restaurant accepted", ar: "وافق المطعم" },
+  "order.step.preparing": { en: "Kitchen preparing", ar: "المطبخ يحضّر الطلب" },
+  "order.step.ready_for_pickup": { en: "Ready for pickup", ar: "جاهز للاستلام" },
+  "order.step.rider_assigned": { en: "Rider assigned", ar: "تم تعيين السائق" },
+  "order.step.on_the_way": { en: "On the way", ar: "في الطريق" },
+  "order.step.delivered": { en: "Delivered", ar: "تم التوصيل" },
 };
 
 const LocaleContext = createContext<LocaleContextValue | null>(null);
@@ -68,4 +113,5 @@ export function useLocale() {
   if (!ctx) throw new Error("useLocale must be used within LocaleProvider");
   return ctx;
 }
+
 

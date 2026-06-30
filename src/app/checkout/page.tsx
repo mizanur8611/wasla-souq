@@ -1,6 +1,7 @@
 "use client";
 
 import { useCart } from "@/components/CartContext";
+import { useLocale } from "@/components/LocaleContext";
 import { computePriceBreakdown } from "@/lib/pricing";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -8,6 +9,7 @@ import { CreditCard, Banknote } from "lucide-react";
 
 export default function CheckoutPage() {
   const { partnerId, lines, subtotal, clearCart } = useCart();
+  const { t } = useLocale();
   const router = useRouter();
   const [address, setAddress] = useState("Home · Marina Walk, Dubai Marina");
   const [paymentMethod, setPaymentMethod] = useState<"card" | "cash">("card");
@@ -46,15 +48,17 @@ export default function CheckoutPage() {
   }
 
   if (lines.length === 0) {
-    return <p className="text-sm text-muted">Your cart is empty — add something from a restaurant first.</p>;
+    return <p className="text-sm text-muted">{t("checkout.empty")}</p>;
   }
 
   return (
     <div>
-      <h1 className="mb-4 font-display text-xl font-bold text-ink">Checkout</h1>
+      <h1 className="mb-4 font-display text-xl font-bold text-ink">{t("checkout.title")}</h1>
 
       <div className="mb-4 rounded-2xl bg-paper p-4">
-        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-muted">Delivery address</label>
+        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-muted">
+          {t("checkout.address")}
+        </label>
         <input
           value={address}
           onChange={(e) => setAddress(e.target.value)}
@@ -63,7 +67,9 @@ export default function CheckoutPage() {
       </div>
 
       <div className="mb-4 rounded-2xl bg-paper p-4">
-        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-muted">Payment method</label>
+        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-muted">
+          {t("checkout.payment")}
+        </label>
         <div className="flex gap-2">
           <button
             onClick={() => setPaymentMethod("card")}
@@ -71,7 +77,7 @@ export default function CheckoutPage() {
               paymentMethod === "card" ? "border-teal bg-tealsoft text-teal" : "border-line text-muted"
             }`}
           >
-            <CreditCard size={15} /> Card
+            <CreditCard size={15} /> {t("checkout.card")}
           </button>
           <button
             onClick={() => setPaymentMethod("cash")}
@@ -79,21 +85,18 @@ export default function CheckoutPage() {
               paymentMethod === "cash" ? "border-teal bg-tealsoft text-teal" : "border-line text-muted"
             }`}
           >
-            <Banknote size={15} /> Cash on delivery
+            <Banknote size={15} /> {t("checkout.cash")}
           </button>
         </div>
-        <p className="mt-2 text-[11px] text-muted">
-          Demo checkout — no real payment is processed. A production build wires this to a PSP supporting mada,
-          Jaywan, NAPS or KNET depending on market.
-        </p>
+        <p className="mt-2 text-[11px] text-muted">{t("checkout.demoNote")}</p>
       </div>
 
       <div className="rounded-2xl bg-paper p-4 text-sm">
-        <Row label="Subtotal" value={breakdown.subtotal} />
-        <Row label="Delivery fee (flat)" value={breakdown.deliveryFee} />
-        <Row label="Service fee" value={breakdown.serviceFee} />
+        <Row label={t("cart.subtotal")} value={breakdown.subtotal} />
+        <Row label={t("cart.deliveryFee")} value={breakdown.deliveryFee} />
+        <Row label={t("cart.serviceFee")} value={breakdown.serviceFee} />
         <div className="mt-2 flex justify-between border-t-2 border-ink pt-3 font-display text-base font-bold text-ink">
-          <span>Total</span>
+          <span>{t("cart.total")}</span>
           <span className="font-mono">AED {breakdown.total.toFixed(2)}</span>
         </div>
       </div>
@@ -105,7 +108,7 @@ export default function CheckoutPage() {
         disabled={submitting}
         className="mt-4 w-full rounded-2xl bg-ink py-3.5 text-center font-display text-sm font-bold text-sand disabled:opacity-60"
       >
-        {submitting ? "Placing order…" : `Place order · AED ${breakdown.total.toFixed(2)}`}
+        {submitting ? t("checkout.placing") : `${t("checkout.place")} · AED ${breakdown.total.toFixed(2)}`}
       </button>
     </div>
   );
@@ -119,3 +122,4 @@ function Row({ label, value }: { label: string; value: number }) {
     </div>
   );
 }
+
