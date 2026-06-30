@@ -1,4 +1,4 @@
-import { findOrCreateCity, createPartner, seedDemoCustomerIfMissing, listApprovedPartners, createUser, getUserByEmail } from "./db";
+import { findOrCreateCity, createPartner, seedDemoCustomerIfMissing, listApprovedPartners, createUser, getUserByEmail, ensureRiderProfile } from "./db";
 import { hashPassword } from "./auth-node";
 
 async function main() {
@@ -110,6 +110,18 @@ async function main() {
     });
     console.log("Seeded admin login: admin@waslasouq.com / admin123");
   }
+
+  if (!(await getUserByEmail("rider@waslasouq.com"))) {
+    const rider = await createUser({
+      email: "rider@waslasouq.com",
+      passwordHash: await hashPassword("rider123"),
+      role: "rider",
+      name: "Yusuf K.",
+      partnerId: null,
+    });
+    await ensureRiderProfile(rider!.id);
+    console.log("Seeded rider login: rider@waslasouq.com / rider123");
+  }
 }
 
 main()
@@ -118,3 +130,6 @@ main()
     process.exit(1);
   })
   .then(() => process.exit(0));
+
+
+  

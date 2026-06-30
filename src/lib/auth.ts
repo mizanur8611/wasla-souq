@@ -11,7 +11,7 @@ const SESSION_COOKIE = "wasla_session";
 
 export interface SessionPayload {
   userId: string;
-  role: "admin" | "restaurant_owner";
+  role: "admin" | "restaurant_owner" | "rider";
   partnerId: string | null;
   name: string;
 }
@@ -45,3 +45,4 @@ export function getSession(): SessionPayload | null {
 export function clearSessionCookie() {
   cookies().delete(SESSION_COOKIE);
 }
+

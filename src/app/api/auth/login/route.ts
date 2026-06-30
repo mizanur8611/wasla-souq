@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getUserByEmail } from "@/lib/db";
+import { getUserByEmail, ensureRiderProfile } from "@/lib/db";
 import { verifyPassword, setSessionCookie } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -19,12 +19,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
   }
 
+  if (user.role === "rider") {
+    // First-login bootstrap: a rider account created via createUser() has no
+    // rider_profiles row yet, since that table only exists for the online/vehicle state
+    // a restaurant_owner/admin user never needs.
+    await ensureRiderProfile(user.id);
+  }
+
   setSessionCookie({
     userId: user.id,
-    role: user.role as "admin" | "restaurant_owner",
+    role: user.role as "admin" | "restaurant_owner" | "rider",
     partnerId: user.partnerId,
     name: user.name,
   });
 
   return NextResponse.json({ id: user.id, email: user.email, role: user.role, name: user.name });
 }
+

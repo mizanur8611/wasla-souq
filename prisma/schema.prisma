@@ -151,8 +151,10 @@ model FulfilmentTask {
   id        String   @id @default(uuid())
   order     Order    @relation(fields: [orderId], references: [id])
   orderId   String   @unique @map("order_id")
+  rider     User?    @relation(fields: [riderId], references: [id])
+  riderId   String?  @map("rider_id")
   riderName String?  @map("rider_name")
-  status    String   @default("unassigned") // unassigned | assigned | picked_up | en_route | delivered
+  status    String   @default("unassigned") // unassigned | assigned | picked_up | en_route | delivered | cancelled
   etaMins   Int      @default(25) @map("eta_mins")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -164,14 +166,30 @@ model FulfilmentTask {
 // Section 8, for the rest of the Phase 1 tables this will grow alongside (rider_profiles,
 // rider_locations, disputes, etc.) as those panels are built.
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  passwordHash String    @map("password_hash")
-  role         String // 'admin' | 'restaurant_owner'
+  id           String          @id @default(uuid())
+  email        String          @unique
+  passwordHash String          @map("password_hash")
+  role         String // 'admin' | 'restaurant_owner' | 'rider'
   name         String
-  partner      Partner?  @relation(fields: [partnerId], references: [id])
-  partnerId    String?   @map("partner_id")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  partner      Partner?        @relation(fields: [partnerId], references: [id])
+  partnerId    String?         @map("partner_id")
+  riderProfile RiderProfile?
+  deliveries   FulfilmentTask[]
+  createdAt    DateTime        @default(now()) @map("created_at")
 
   @@map("users")
+}
+
+// Phase 1 Rider App addition: the rider-only mutable state that doesn't belong on the
+// generic users table (online toggle, vehicle, running rating). One row per rider user.
+// GPS/live location isn't modelled yet — see roadmap doc "GPS/Location feature".
+model RiderProfile {
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String   @id @map("user_id")
+  vehicleType String   @default("motorbike") @map("vehicle_type")
+  isOnline    Boolean  @default(false) @map("is_online")
+  ratingAvg   Float    @default(5.0) @map("rating_avg")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("rider_profiles")
 }

@@ -162,6 +162,21 @@ function ensureSchema(): Promise<void> {
       -- stored directly on the order rather than a separate reviews table at this scale.
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_rating INTEGER;
       ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_review TEXT;
+
+      -- Phase 1 addition: Rider App. Riders are users with role='rider' (see users table
+      -- above); rider_profiles holds the extra mutable state that doesn't belong on the
+      -- generic users table (online toggle, vehicle, rating). fulfilment_tasks gets a
+      -- rider_id so a rider can be matched to exactly the deliveries they claimed, while
+      -- rider_name stays as-is for display on the customer tracking page.
+      ALTER TABLE fulfilment_tasks ADD COLUMN IF NOT EXISTS rider_id UUID REFERENCES users(id);
+
+      CREATE TABLE IF NOT EXISTS rider_profiles (
+        user_id UUID PRIMARY KEY REFERENCES users(id),
+        vehicle_type TEXT NOT NULL DEFAULT 'motorbike',
+        is_online BOOLEAN NOT NULL DEFAULT false,
+        rating_avg REAL NOT NULL DEFAULT 5.0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
     `).then(() => undefined);
   }
   return schemaReady;
@@ -440,7 +455,7 @@ export async function getOrderById(orderId: string) {
 export async function createUser(opts: {
   email: string;
   passwordHash: string;
-  role: "admin" | "restaurant_owner";
+  role: "admin" | "restaurant_owner" | "rider";
   name: string;
   partnerId?: string | null;
 }) {
@@ -679,5 +694,196 @@ export async function submitOrderRating(orderId: string, rating: number, review?
     orderId,
   ]);
   return getOrderById(orderId);
+}
+
+// ---------- Rider App (Phase 1) ----------
+
+function toRiderProfileShape(row: any) {
+  return {
+    userId: row.id ?? row.user_id,
+    name: row.name,
+    email: row.email,
+    vehicleType: row.vehicle_type,
+    isOnline: row.is_online,
+    ratingAvg: row.rating_avg,
+  };
+}
+
+// Called right after a rider's first successful login so every rider account ends up with
+// a profile row without needing a separate sign-up step (mirrors how restaurant owners
+// are created with a row already in place by seed.ts).
+export async function ensureRiderProfile(userId: string) {
+  await ensureSchema();
+  const existing = await pool.query("SELECT * FROM rider_profiles WHERE user_id = $1", [userId]);
+  if (!existing.rows.length) {
+    await pool.query(
+      "INSERT INTO rider_profiles (user_id, vehicle_type, is_online, rating_avg) VALUES ($1,'motorbike',false,5.0) ON CONFLICT (user_id) DO NOTHING",
+      [userId]
+    );
+  }
+  return getRiderProfile(userId);
+}
+
+export async function getRiderProfile(userId: string) {
+  await ensureSchema();
+  const res = await pool.query(
+    `SELECT u.id, u.name, u.email, rp.vehicle_type, rp.is_online, rp.rating_avg
+     FROM users u JOIN rider_profiles rp ON rp.user_id = u.id WHERE u.id = $1`,
+    [userId]
+  );
+  if (!res.rows.length) return null;
+  return toRiderProfileShape(res.rows[0]);
+}
+
+export async function setRiderOnlineStatus(userId: string, isOnline: boolean) {
+  await ensureSchema();
+  await pool.query("UPDATE rider_profiles SET is_online = $1, updated_at = now() WHERE user_id = $2", [
+    isOnline,
+    userId,
+  ]);
+  return getRiderProfile(userId);
+}
+
+export async function updateRiderVehicle(userId: string, vehicleType: string) {
+  await ensureSchema();
+  await pool.query("UPDATE rider_profiles SET vehicle_type = $1, updated_at = now() WHERE user_id = $2", [
+    vehicleType,
+    userId,
+  ]);
+  return getRiderProfile(userId);
+}
+
+// Orders a rider can claim: the restaurant has marked them ready and no rider has taken
+// them yet. We don't have partner street addresses in Phase 1, so partner name + the
+// order's delivery address stand in for pickup/drop-off until a real address/GPS model
+// exists (see roadmap doc, "GPS/Location feature").
+export async function listAvailableOrdersForRiders() {
+  await ensureSchema();
+  const res = await pool.query(
+    `SELECT o.*, p.name AS partner_name, p.hero_emoji AS partner_hero_emoji
+     FROM orders o
+     JOIN partners p ON p.id = o.partner_id
+     JOIN fulfilment_tasks f ON f.order_id = o.id
+     WHERE o.status = 'ready_for_pickup' AND f.rider_id IS NULL
+     ORDER BY o.created_at ASC LIMIT 50`
+  );
+  return res.rows.map((order: any) => ({
+    id: order.id,
+    total: order.total,
+    deliveryFee: order.delivery_fee,
+    deliveryAddress: order.delivery_address,
+    partnerName: order.partner_name,
+    partnerHeroEmoji: order.partner_hero_emoji,
+    createdAt: order.created_at,
+  }));
+}
+
+// Active + history deliveries for one rider, most recent first.
+export async function listOrdersForRider(riderId: string) {
+  await ensureSchema();
+  const res = await pool.query(
+    `SELECT o.*, p.name AS partner_name, p.hero_emoji AS partner_hero_emoji
+     FROM orders o
+     JOIN partners p ON p.id = o.partner_id
+     JOIN fulfilment_tasks f ON f.order_id = o.id
+     WHERE f.rider_id = $1
+     ORDER BY o.created_at DESC LIMIT 100`,
+    [riderId]
+  );
+  return res.rows.map((order: any) => ({
+    id: order.id,
+    status: order.status,
+    total: order.total,
+    deliveryFee: order.delivery_fee,
+    deliveryAddress: order.delivery_address,
+    partnerName: order.partner_name,
+    partnerHeroEmoji: order.partner_hero_emoji,
+    createdAt: order.created_at,
+  }));
+}
+
+// A rider claims an unassigned, ready order. Race-safe via the `rider_id IS NULL` guard:
+// if two riders tap "accept" on the same order at once, only the first UPDATE matches a
+// row — the second gets 0 rows back and the API route reports it as already taken instead
+// of double-assigning the same delivery.
+export async function assignRiderToOrder(orderId: string, riderId: string, riderName: string) {
+  await ensureSchema();
+  const res = await pool.query(
+    `UPDATE fulfilment_tasks SET rider_id = $1, rider_name = $2, status = 'assigned', updated_at = now()
+     WHERE order_id = $3 AND rider_id IS NULL RETURNING *`,
+    [riderId, riderName, orderId]
+  );
+  if (!res.rows.length) return null;
+  await pool.query("UPDATE orders SET status = 'rider_assigned' WHERE id = $1", [orderId]);
+  return getOrderById(orderId);
+}
+
+const RIDER_ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  rider_assigned: ["picked_up", "cancelled"],
+  picked_up: ["on_the_way"],
+  on_the_way: ["delivered"],
+};
+
+const RIDER_FULFILMENT_STATUS: Record<string, string> = {
+  picked_up: "picked_up",
+  on_the_way: "en_route",
+  delivered: "delivered",
+  cancelled: "cancelled",
+};
+
+// Mirrors updateOrderStatus's role as the single validated entry point, but scoped to the
+// rider-owned portion of the lifecycle (rider_assigned -> picked_up -> on_the_way ->
+// delivered) and checked against fulfilment_tasks.rider_id so a rider can only move
+// deliveries they themselves claimed.
+export async function updateRiderOrderStatus(orderId: string, riderId: string, newStatus: string) {
+  await ensureSchema();
+  const fRes = await pool.query("SELECT * FROM fulfilment_tasks WHERE order_id = $1", [orderId]);
+  if (!fRes.rows.length || fRes.rows[0].rider_id !== riderId) return null;
+
+  const order = await getOrderById(orderId);
+  if (!order) return null;
+
+  const allowedNext = RIDER_ALLOWED_TRANSITIONS[order.status] || [];
+  if (!allowedNext.includes(newStatus)) {
+    throw new Error(`Cannot move order from "${order.status}" to "${newStatus}"`);
+  }
+
+  await pool.query("UPDATE orders SET status = $1 WHERE id = $2", [newStatus, orderId]);
+  await pool.query("UPDATE fulfilment_tasks SET status = $1, updated_at = now() WHERE order_id = $2", [
+    RIDER_FULFILMENT_STATUS[newStatus] ?? newStatus,
+    orderId,
+  ]);
+  return getOrderById(orderId);
+}
+
+// Earnings computed directly from delivered orders (rider keeps the order's full
+// delivery_fee) — same "no separate ledger table at this scale" approach as
+// getPartnerSalesStats, until a real payout/ledger system exists.
+export async function getRiderEarnings(riderId: string) {
+  await ensureSchema();
+  const totalsRes = await pool.query(
+    `SELECT COUNT(*)::int AS delivery_count, COALESCE(SUM(o.delivery_fee),0)::float AS total_earnings
+     FROM orders o JOIN fulfilment_tasks f ON f.order_id = o.id
+     WHERE f.rider_id = $1 AND o.status = 'delivered'`,
+    [riderId]
+  );
+  const todayRes = await pool.query(
+    `SELECT COUNT(*)::int AS delivery_count, COALESCE(SUM(o.delivery_fee),0)::float AS earnings
+     FROM orders o JOIN fulfilment_tasks f ON f.order_id = o.id
+     WHERE f.rider_id = $1 AND o.status = 'delivered' AND o.created_at >= date_trunc('day', now())`,
+    [riderId]
+  );
+  const weekRes = await pool.query(
+    `SELECT COUNT(*)::int AS delivery_count, COALESCE(SUM(o.delivery_fee),0)::float AS earnings
+     FROM orders o JOIN fulfilment_tasks f ON f.order_id = o.id
+     WHERE f.rider_id = $1 AND o.status = 'delivered' AND o.created_at >= now() - interval '7 days'`,
+    [riderId]
+  );
+  return {
+    totalEarnings: totalsRes.rows[0].total_earnings,
+    totalDeliveries: totalsRes.rows[0].delivery_count,
+    today: { earnings: todayRes.rows[0].earnings, deliveries: todayRes.rows[0].delivery_count },
+    week: { earnings: weekRes.rows[0].earnings, deliveries: weekRes.rows[0].delivery_count },
+  };
 }
 
