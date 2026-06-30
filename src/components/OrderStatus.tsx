@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Circle, XCircle, Star } from "lucide-react";
+import { CheckCircle2, Circle, XCircle, Star, Camera, Banknote } from "lucide-react";
 import { useLocale } from "@/components/LocaleContext";
 
 const STEP_KEYS = [
@@ -19,7 +19,7 @@ interface OrderData {
   status: string;
   total: number;
   partner: { name: string; nameAr?: string | null };
-  fulfilment: { riderName: string; etaMins: number } | null;
+  fulfilment: { riderName: string; etaMins: number; proofPhotoData?: string | null; cashCollected?: boolean } | null;
   items: { id: string; nameSnapshot: string; quantity: number; unitPrice: number }[];
   customerRating?: number | null;
 }
@@ -106,6 +106,20 @@ export default function OrderStatus({ order }: { order: OrderData }) {
           <span className="font-mono">AED {order.total.toFixed(2)}</span>
         </div>
       </div>
+
+      {isDelivered && order.fulfilment?.proofPhotoData && (
+        <div className="mt-5 rounded-2xl bg-paper p-4">
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
+            <Camera size={13} /> Delivery photo
+          </div>
+          <img src={order.fulfilment.proofPhotoData} alt="Delivery proof" className="w-full rounded-xl" />
+          {order.fulfilment.cashCollected && (
+            <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-teal">
+              <Banknote size={13} /> Cash payment confirmed by rider
+            </div>
+          )}
+        </div>
+      )}
 
       {isDelivered && <RateOrder orderId={order.id} existingRating={order.customerRating} />}
     </div>

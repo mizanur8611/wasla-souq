@@ -17,6 +17,8 @@ import {
   Check,
   Ban,
   Plus,
+  Camera,
+  Banknote,
 } from "lucide-react";
 
 const LiveMap = dynamic(() => import("@/components/LiveMap"), { ssr: false });
@@ -82,6 +84,9 @@ interface Dispute {
   refundAmount: number | null;
   resolvedAt: string | null;
   createdAt: string;
+  riderName?: string | null;
+  cashCollected?: boolean | null;
+  hasProofPhoto?: boolean;
 }
 interface Analytics {
   totalOrders: number;
@@ -717,7 +722,13 @@ function DisputesTab({
                 <span className="text-xs text-muted">{new Date(d.createdAt).toLocaleString()}</span>
               </div>
               <p className="mt-1 text-sm text-inksoft">{d.message}</p>
-              {d.orderId && <p className="mt-1 font-mono text-xs text-muted">Order #{d.orderId.slice(-8).toUpperCase()}</p>}
+              {d.orderId && (
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <p className="font-mono text-xs text-muted">Order #{d.orderId.slice(-8).toUpperCase()}</p>
+                  {d.riderName && <span className="text-xs text-muted">· rider: {d.riderName}</span>}
+                  {d.hasProofPhoto && <DeliveryProofViewer orderId={d.orderId} />}
+                </div>
+              )}
 
               {resolvingId === d.id ? (
                 <div className="mt-3 space-y-2 rounded-xl bg-sand p-3">
@@ -773,6 +784,11 @@ function DisputesTab({
               </div>
               <p className="mt-1 text-sm text-muted">{d.message}</p>
               {d.resolution && <p className="mt-1 text-xs text-teal">Resolution: {d.resolution}</p>}
+              {d.orderId && d.hasProofPhoto && (
+                <div className="mt-1">
+                  <DeliveryProofViewer orderId={d.orderId} />
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -787,6 +803,59 @@ function DisputesTab({
           Wire this up to a real payment gateway before launch (see README, "Known items before production").
         </p>
       </div>
+    </div>
+  );
+}
+
+// Lazy-loads and shows a delivery's proof-of-delivery photo (R6 data, captured by the
+// rider) only when an admin actually clicks to view it — the dispute list itself never
+// carries the base64 image data, just a boolean flag (hasProofPhoto) for whether one exists.
+function DeliveryProofViewer({ orderId }: { orderId: string }) {
+  const [open, setOpen] = useState(false);
+  const [proof, setProof] = useState<{ photoData: string | null; cashCollected: boolean; riderName: string | null } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function toggle() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (!proof) {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/admin/orders/${orderId}/proof`);
+        if (res.ok) setProof(await res.json());
+      } finally {
+        setLoading(false);
+      }
+    }
+  }
+
+  return (
+    <div>
+      <button
+        onClick={toggle}
+        className="flex items-center gap-1 rounded-full bg-tealsoft px-2 py-0.5 text-[11px] font-bold text-teal"
+      >
+        <Camera size={11} /> {open ? "Hide proof" : "View delivery proof"}
+      </button>
+      {open && (
+        <div className="mt-2 max-w-xs rounded-xl bg-sand p-2">
+          {loading && <p className="text-xs text-muted">Loading…</p>}
+          {!loading && proof?.photoData && (
+            <>
+              <img src={proof.photoData} alt="Delivery proof" className="w-full rounded-lg" />
+              {proof.cashCollected && (
+                <div className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-teal">
+                  <Banknote size={11} /> Cash collection confirmed by {proof.riderName || "rider"}
+                </div>
+              )}
+            </>
+          )}
+          {!loading && !proof?.photoData && <p className="text-xs text-muted">No photo on file for this delivery.</p>}
+        </div>
+      )}
     </div>
   );
 }

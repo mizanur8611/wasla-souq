@@ -534,6 +534,8 @@ export async function getOrderById(orderId: string) {
           riderLat: fulfilmentRes.rows[0].rider_last_lat,
           riderLng: fulfilmentRes.rows[0].rider_last_lng,
           riderLocationAt: fulfilmentRes.rows[0].rider_last_location_at,
+          proofPhotoData: fulfilmentRes.rows[0].proof_photo_data,
+          cashCollected: fulfilmentRes.rows[0].cash_collected,
           updatedAt: fulfilmentRes.rows[0].updated_at,
         }
       : null,
@@ -1177,8 +1179,10 @@ export async function listOnlineRidersForAdmin() {
 export async function listAllDisputesForAdmin() {
   await ensureSchema();
   const res = await pool.query(
-    `SELECT d.*, p.name AS partner_name FROM disputes d
+    `SELECT d.*, p.name AS partner_name, f.rider_name, f.cash_collected, (f.proof_photo_data IS NOT NULL) AS has_proof_photo
+     FROM disputes d
      JOIN partners p ON p.id = d.partner_id
+     LEFT JOIN fulfilment_tasks f ON f.order_id = d.order_id
      ORDER BY d.created_at DESC LIMIT 200`
   );
   return res.rows.map((r: any) => ({
@@ -1192,7 +1196,27 @@ export async function listAllDisputesForAdmin() {
     refundAmount: r.refund_amount,
     resolvedAt: r.resolved_at,
     createdAt: r.created_at,
+    riderName: r.rider_name,
+    cashCollected: r.cash_collected,
+    hasProofPhoto: r.has_proof_photo,
   }));
+}
+
+// The dispute list above deliberately omits the actual photo bytes (base64 images in
+// every row would bloat a list response nobody's looking at yet) — this is the lazy-load
+// fetch for when an admin actually opens one dispute's delivery proof.
+export async function getDeliveryProofForOrder(orderId: string) {
+  await ensureSchema();
+  const res = await pool.query(
+    "SELECT proof_photo_data, cash_collected, rider_name FROM fulfilment_tasks WHERE order_id = $1",
+    [orderId]
+  );
+  if (!res.rows.length) return null;
+  return {
+    photoData: res.rows[0].proof_photo_data,
+    cashCollected: res.rows[0].cash_collected,
+    riderName: res.rows[0].rider_name,
+  };
 }
 
 export async function resolveDispute(disputeId: string, resolution: string, refundAmount?: number | null) {
@@ -1265,6 +1289,5 @@ export async function getPlatformAnalytics() {
     },
   };
 }
-
 
 
