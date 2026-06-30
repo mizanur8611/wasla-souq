@@ -146,6 +146,18 @@ function ensureSchema(): Promise<void> {
         WHERE name = 'Karak Corner' AND image_url IS NULL;
       UPDATE partners SET image_url = 'https://loremflickr.com/600/400/shawarma'
         WHERE name = 'Bait Al Shawarma' AND image_url IS NULL;
+        -- Phase 1 addition: restaurant-panel "temporarily closed" toggle and a basic
+      -- dispute-filing channel from restaurant -> admin.
+      ALTER TABLE partners ADD COLUMN IF NOT EXISTS is_open BOOLEAN NOT NULL DEFAULT true;
+
+      CREATE TABLE IF NOT EXISTS disputes (
+        id UUID PRIMARY KEY,
+        partner_id UUID NOT NULL REFERENCES partners(id),
+        order_id UUID REFERENCES orders(id),
+        message TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
     `).then(() => undefined);
   }
   return schemaReady;
@@ -295,6 +307,7 @@ function toPartnerShape(row: any) {
     etaMinsHigh: row.eta_mins_high,
     heroEmoji: row.hero_emoji,
     heroImageUrl: row.image_url,
+    isOpen: row.is_open,
     createdAt: row.created_at,
   };
 }
@@ -537,3 +550,81 @@ export async function updateOrderStatus(orderId: string, newStatus: string) {
   if (!res.rows.length) return null;
   return getOrderById(orderId);
 }
+
+
+// ---------- Restaurant Panel: profile, hours, sales, disputes (Phase 1) ----------
+
+export async function updatePartnerProfile(
+  partnerId: string,
+  fields: { name?: string; nameAr?: string | null; cuisineTag?: string | null; heroEmoji?: string }
+) {
+  await ensureSchema();
+  await pool.query(
+    `UPDATE partners SET
+       name = COALESCE($2, name),
+       name_ar = COALESCE($3, name_ar),
+       cuisine_tag = COALESCE($4, cuisine_tag),
+       hero_emoji = COALESCE($5, hero_emoji)
+     WHERE id = $1`,
+    [partnerId, fields.name ?? null, fields.nameAr ?? null, fields.cuisineTag ?? null, fields.heroEmoji ?? null]
+  );
+  return getPartnerById(partnerId);
+}
+
+export async function setPartnerOpenStatus(partnerId: string, isOpen: boolean) {
+  await ensureSchema();
+  await pool.query("UPDATE partners SET is_open = $1 WHERE id = $2", [isOpen, partnerId]);
+}
+
+// Lightweight sales summary computed directly from orders/order_items — no separate
+// analytics table needed at this scale. "This week" = last 7 days by created_at.
+export async function getPartnerSalesStats(partnerId: string) {
+  await ensureSchema();
+  const revenueRes = await pool.query(
+    `SELECT COUNT(*)::int AS order_count, COALESCE(SUM(total),0)::float AS revenue
+     FROM orders
+     WHERE partner_id = $1 AND status = 'delivered' AND created_at >= now() - interval '7 days'`,
+    [partnerId]
+  );
+  const topItemsRes = await pool.query(
+    `SELECT oi.name_snapshot AS name, COUNT(*)::int AS qty
+     FROM order_items oi
+     JOIN orders o ON o.id = oi.order_id
+     WHERE o.partner_id = $1 AND o.created_at >= now() - interval '7 days'
+     GROUP BY oi.name_snapshot
+     ORDER BY qty DESC
+     LIMIT 5`,
+    [partnerId]
+  );
+  return {
+    orderCount: revenueRes.rows[0].order_count,
+    revenue: revenueRes.rows[0].revenue,
+    topItems: topItemsRes.rows,
+  };
+}
+
+export async function createDispute(partnerId: string, message: string, orderId?: string | null) {
+  await ensureSchema();
+  const disputeId = id();
+  await pool.query(
+    "INSERT INTO disputes (id, partner_id, order_id, message, status) VALUES ($1,$2,$3,$4,'open')",
+    [disputeId, partnerId, orderId ?? null, message]
+  );
+  return disputeId;
+}
+
+export async function listDisputesForPartner(partnerId: string) {
+  await ensureSchema();
+  const res = await pool.query(
+    "SELECT * FROM disputes WHERE partner_id = $1 ORDER BY created_at DESC",
+    [partnerId]
+  );
+  return res.rows.map((r: any) => ({
+    id: r.id,
+    orderId: r.order_id,
+    message: r.message,
+    status: r.status,
+    createdAt: r.created_at,
+  }));
+}
+

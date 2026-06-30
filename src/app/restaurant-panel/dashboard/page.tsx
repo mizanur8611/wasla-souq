@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, ChefHat, Package, LogOut, RefreshCw, Plus, UtensilsCrossed } from "lucide-react";
+import { Check, X, ChefHat, Package, LogOut, RefreshCw, Plus, UtensilsCrossed, Clock, BarChart3, AlertTriangle, Store } from "lucide-react";
 
 interface OrderItem {
   name: string;
@@ -40,7 +40,15 @@ const STATUS_COLOR: Record<string, string> = {
   delivered: "bg-sanddeep text-ink",
 };
 
-type Tab = "orders" | "menu";
+type Tab = "orders" | "menu" | "hours" | "sales" | "disputes" | "profile";
+const TAB_LABEL: Record<Tab, string> = {
+  orders: "Order queue",
+  menu: "Menu management",
+  hours: "Business hours",
+  sales: "Sales & analytics",
+  disputes: "Dispute center",
+  profile: "Restaurant profile",
+};
 
 export default function RestaurantDashboard() {
   const router = useRouter();
@@ -102,7 +110,7 @@ export default function RestaurantDashboard() {
         <div className="mx-auto flex max-w-3xl items-center justify-between">
           <div>
             <div className="font-display text-base font-bold text-ink">Restaurant Panel</div>
-            <div className="text-xs text-muted">{tab === "orders" ? "Order queue" : "Menu management"}</div>
+            <div className="text-xs text-muted">{TAB_LABEL[tab]}</div>
           </div>
           <div className="flex items-center gap-2">
             {tab === "orders" && (
@@ -121,9 +129,13 @@ export default function RestaurantDashboard() {
       </header>
 
       <div className="border-b border-line bg-paper px-5">
-        <div className="mx-auto flex max-w-3xl gap-1">
+        <div className="mx-auto flex max-w-3xl gap-1 overflow-x-auto">
           <TabButton active={tab === "orders"} onClick={() => setTab("orders")} icon={<Package size={14} />} label="Orders" />
           <TabButton active={tab === "menu"} onClick={() => setTab("menu")} icon={<UtensilsCrossed size={14} />} label="Menu" />
+          <TabButton active={tab === "hours"} onClick={() => setTab("hours")} icon={<Clock size={14} />} label="Hours" />
+          <TabButton active={tab === "sales"} onClick={() => setTab("sales")} icon={<BarChart3 size={14} />} label="Sales" />
+          <TabButton active={tab === "disputes"} onClick={() => setTab("disputes")} icon={<AlertTriangle size={14} />} label="Disputes" />
+          <TabButton active={tab === "profile"} onClick={() => setTab("profile")} icon={<Store size={14} />} label="Profile" />
         </div>
       </div>
 
@@ -209,8 +221,16 @@ export default function RestaurantDashboard() {
               </div>
             </section>
           </>
-        ) : (
+        ) : tab === "menu" ? (
           <MenuManager />
+        ) : tab === "hours" ? (
+          <HoursManager />
+        ) : tab === "sales" ? (
+          <SalesView />
+        ) : tab === "disputes" ? (
+          <DisputeCenter />
+        ) : (
+          <ProfileManager />
         )}
       </main>
     </div>
@@ -352,6 +372,273 @@ function Field({
         className="w-full rounded-xl border border-line bg-sand px-3 py-2.5 text-sm outline-none focus:border-gold"
       />
     </label>
+  );
+}
+
+// Toggle the restaurant open/closed for new orders. Weekly hours display is static for now —
+// a real per-day schedule editor is a natural next addition once this toggle is confirmed
+// to work end to end.
+function HoursManager() {
+  const [isOpen, setIsOpen] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/restaurant/profile")
+      .then((r) => r.json())
+      .then((p) => setIsOpen(p.isOpen));
+  }, []);
+
+  async function toggle() {
+    if (isOpen === null) return;
+    setSaving(true);
+    const next = !isOpen;
+    try {
+      await fetch("/api/restaurant/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isOpen: next }),
+      });
+      setIsOpen(next);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const DAYS = ["Saturday", "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
+  return (
+    <div>
+      <h2 className="mb-1 font-display text-base font-bold text-ink">Business Hours</h2>
+      <p className="mb-4 text-sm text-muted">Customers can't order while you're marked closed.</p>
+
+      {isOpen !== null && (
+        <button
+          onClick={toggle}
+          disabled={saving}
+          className={`mb-5 flex w-full items-center justify-between rounded-2xl p-4 text-sm font-bold disabled:opacity-60 ${
+            isOpen ? "bg-tealsoft text-teal" : "bg-claysoft text-clay"
+          }`}
+        >
+          <span>{isOpen ? "🟢 Open — accepting orders" : "🔴 Temporarily closed"}</span>
+          <span className="rounded-full bg-white/60 px-3 py-1 text-xs">{saving ? "Saving…" : "Tap to toggle"}</span>
+        </button>
+      )}
+
+      <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Weekly schedule</h3>
+      <div className="space-y-2">
+        {DAYS.map((d) => (
+          <div key={d} className="flex justify-between rounded-xl bg-paper p-3 text-sm">
+            <span className="font-semibold text-ink">{d}</span>
+            <span className="text-muted">11:00 AM – 11:00 PM</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[11px] text-muted">
+        Per-day editing is coming next — for now the open/closed toggle above is the live control.
+      </p>
+    </div>
+  );
+}
+
+function SalesView() {
+  const [stats, setStats] = useState<{ orderCount: number; revenue: number; topItems: { name: string; qty: number }[] } | null>(
+    null
+  );
+
+  useEffect(() => {
+    fetch("/api/restaurant/sales")
+      .then((r) => r.json())
+      .then(setStats);
+  }, []);
+
+  if (!stats) return <p className="text-sm text-muted">Loading…</p>;
+
+  const maxQty = Math.max(...stats.topItems.map((i) => i.qty), 1);
+
+  return (
+    <div>
+      <h2 className="mb-1 font-display text-base font-bold text-ink">Sales & Analytics</h2>
+      <p className="mb-4 text-sm text-muted">Last 7 days, delivered orders only.</p>
+
+      <div className="mb-5 rounded-2xl bg-ink p-4 text-sand">
+        <div className="text-xs font-semibold uppercase tracking-wide text-[#9fb3bd]">Revenue this week</div>
+        <div className="mt-1 font-display text-2xl font-bold">AED {stats.revenue.toFixed(2)}</div>
+        <div className="mt-1 text-xs text-[#9fb3bd]">{stats.orderCount} delivered orders</div>
+      </div>
+
+      <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Top items</h3>
+      {stats.topItems.length === 0 && <p className="text-sm text-muted">No orders yet this week.</p>}
+      <div className="space-y-2">
+        {stats.topItems.map((item) => (
+          <div key={item.name} className="flex items-center gap-3">
+            <span className="w-28 flex-shrink-0 truncate text-xs font-semibold text-ink">{item.name}</span>
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-sanddeep">
+              <div className="h-full rounded-full bg-gold" style={{ width: `${(item.qty / maxQty) * 100}%` }} />
+            </div>
+            <span className="w-6 text-right text-xs text-muted">{item.qty}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DisputeCenter() {
+  const [disputes, setDisputes] = useState<{ id: string; message: string; status: string; createdAt: string }[] | null>(null);
+  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const load = useCallback(() => {
+    fetch("/api/restaurant/disputes")
+      .then((r) => r.json())
+      .then(setDisputes);
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function submit() {
+    if (!message.trim()) return;
+    setSubmitting(true);
+    try {
+      await fetch("/api/restaurant/disputes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      setMessage("");
+      load();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="mb-1 font-display text-base font-bold text-ink">Dispute Center</h2>
+      <p className="mb-4 text-sm text-muted">Report an issue directly to the admin team.</p>
+
+      <div className="mb-5 rounded-2xl bg-paper p-4">
+        <label className="mb-2 block text-xs font-bold uppercase tracking-wide text-muted">New dispute</label>
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder="Describe the issue — e.g. a delivery dispute, payout question…"
+          className="h-20 w-full rounded-xl border border-line bg-sand px-3 py-2.5 text-sm outline-none focus:border-gold"
+        />
+        <button
+          onClick={submit}
+          disabled={submitting || !message.trim()}
+          className="mt-2 rounded-xl bg-ink px-4 py-2 text-sm font-bold text-sand disabled:opacity-60"
+        >
+          {submitting ? "Submitting…" : "Submit dispute"}
+        </button>
+      </div>
+
+      <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Your disputes</h3>
+      {disputes === null && <p className="text-sm text-muted">Loading…</p>}
+      {disputes?.length === 0 && <p className="text-sm text-muted">No disputes filed.</p>}
+      <div className="space-y-2">
+        {disputes?.map((d) => (
+          <div key={d.id} className="rounded-2xl bg-paper p-4">
+            <div className="flex items-center justify-between">
+              <span
+                className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                  d.status === "open" ? "bg-goldsoft text-[#8a611f]" : "bg-tealsoft text-teal"
+                }`}
+              >
+                {d.status === "open" ? "Under review" : "Resolved"}
+              </span>
+              <span className="text-[11px] text-muted">{new Date(d.createdAt).toLocaleDateString()}</span>
+            </div>
+            <p className="mt-2 text-sm text-ink">{d.message}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProfileManager() {
+  const [partner, setPartner] = useState<{ name: string; nameAr: string | null; cuisineTag: string | null; heroEmoji: string } | null>(
+    null
+  );
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/restaurant/profile")
+      .then((r) => r.json())
+      .then(setPartner);
+  }, []);
+
+  async function save() {
+    if (!partner) return;
+    setSaving(true);
+    setSaved(false);
+    try {
+      await fetch("/api/restaurant/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(partner),
+      });
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!partner) return <p className="text-sm text-muted">Loading…</p>;
+
+  return (
+    <div>
+      <h2 className="mb-4 font-display text-base font-bold text-ink">Restaurant Profile</h2>
+      <div className="space-y-3 rounded-2xl bg-paper p-4">
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted">Name (English)</span>
+          <input
+            value={partner.name}
+            onChange={(e) => setPartner({ ...partner, name: e.target.value })}
+            className="w-full rounded-xl border border-line bg-sand px-3 py-2.5 text-sm outline-none focus:border-gold"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted">Name (Arabic)</span>
+          <input
+            value={partner.nameAr || ""}
+            onChange={(e) => setPartner({ ...partner, nameAr: e.target.value })}
+            className="w-full rounded-xl border border-line bg-sand px-3 py-2.5 text-sm outline-none focus:border-gold"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted">Cuisine tag</span>
+          <input
+            value={partner.cuisineTag || ""}
+            onChange={(e) => setPartner({ ...partner, cuisineTag: e.target.value })}
+            className="w-full rounded-xl border border-line bg-sand px-3 py-2.5 text-sm outline-none focus:border-gold"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted">Emoji icon</span>
+          <input
+            value={partner.heroEmoji}
+            onChange={(e) => setPartner({ ...partner, heroEmoji: e.target.value })}
+            className="w-full rounded-xl border border-line bg-sand px-3 py-2.5 text-sm outline-none focus:border-gold"
+          />
+        </label>
+      </div>
+
+      {saved && <p className="mt-3 text-sm font-semibold text-teal">Profile updated.</p>}
+
+      <button
+        onClick={save}
+        disabled={saving}
+        className="mt-4 rounded-xl bg-ink px-5 py-3 text-sm font-bold text-sand disabled:opacity-60"
+      >
+        {saving ? "Saving…" : "Save changes"}
+      </button>
+    </div>
   );
 }
 
