@@ -13,8 +13,6 @@ interface LocaleContextValue {
 
 const STORAGE_KEY = "wasla-souq-locale";
 
-// Centralised UI string dictionary. Keep keys descriptive — this is the single
-// place new copy gets added for both languages, so nothing ships English-only.
 const dictionary: Record<string, { en: string; ar: string }> = {
   "header.location": { en: "Dubai", ar: "دبي" },
   "header.cart": { en: "Cart", ar: "السلة" },
@@ -29,6 +27,11 @@ const dictionary: Record<string, { en: string; ar: string }> = {
   "home.empty.or": { en: "or add one from", ar: "أو أضف مطعماً من" },
   "card.halal": { en: "Halal", ar: "حلال" },
   "card.min": { en: "min", ar: "د" },
+  "restaurant.halalVerified": { en: "Halal verified", ar: "حلال موثّق" },
+  "category.mains": { en: "Mains", ar: "الأطباق الرئيسية" },
+  "category.sides": { en: "Sides", ar: "الأطباق الجانبية" },
+  "category.drinks": { en: "Drinks", ar: "المشروبات" },
+  "menu.add": { en: "Add", ar: "إضافة" },
 };
 
 const LocaleContext = createContext<LocaleContextValue | null>(null);

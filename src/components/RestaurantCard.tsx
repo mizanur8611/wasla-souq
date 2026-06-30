@@ -52,4 +52,3 @@ export default function RestaurantCard(p: Props) {
     </Link>
   );
 }
-
