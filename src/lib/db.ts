@@ -222,6 +222,19 @@ export async function createPartner(opts: {
   return getPartnerById(partnerId);
 }
 
+// Lets a logged-in restaurant owner add a single new item to their own menu,
+// outside the bulk-onboarding path createPartner() uses for brand-new restaurants.
+export async function addCatalogItem(partnerId: string, item: ItemInput) {
+  await ensureSchema();
+  const itemId = id();
+  await pool.query(
+    `INSERT INTO catalog_items (id, partner_id, category, name, name_ar, description, price, is_available)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,true)`,
+    [itemId, partnerId, item.category ?? "mains", item.name, item.nameAr ?? null, item.description ?? null, item.price]
+  );
+  return itemId;
+}
+
 export async function listApprovedPartners() {
   await ensureSchema();
   const result = await pool.query("SELECT * FROM partners WHERE status = 'approved' ORDER BY rating_avg DESC");
