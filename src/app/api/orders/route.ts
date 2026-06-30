@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPartnerById, getCatalogItemsByIds, createOrder, findOrCreateDemoCustomer } from "@/lib/db";
+import { getPartnerById, getCatalogItemsByIds, createOrder, findOrCreateDemoCustomer, listOrdersForCustomer } from "@/lib/db";
 import { computePriceBreakdown } from "@/lib/pricing";
 
 interface CreateOrderBody {
@@ -7,6 +7,16 @@ interface CreateOrderBody {
   deliveryAddress: string;
   paymentMethod: string;
   lines: { catalogItemId: string; quantity: number }[];
+}
+
+export const dynamic = "force-dynamic";
+
+// Phase 1 has a single seeded demo customer (no real customer auth yet), so "my orders"
+// means this customer's orders — the same scoping createOrder already uses.
+export async function GET() {
+  const customer = await findOrCreateDemoCustomer();
+  const orders = await listOrdersForCustomer(customer.id);
+  return NextResponse.json(orders);
 }
 
 export async function POST(req: Request) {
@@ -21,9 +31,6 @@ export async function POST(req: Request) {
 
   const catalogItems = await getCatalogItemsByIds(body.lines.map((l) => l.catalogItemId));
 
-  // Price is always recomputed server-side from the current catalog price, never taken
-  // from the client — this is what keeps "no surge, no surprise fees" a guarantee rather
-  // than a UI claim that a modified request could bypass.
   let subtotal = 0;
   const lines = body.lines.map((line) => {
     const item = catalogItems.find((c: any) => c.id === line.catalogItemId);
@@ -50,3 +57,4 @@ export async function POST(req: Request) {
 
   return NextResponse.json(order, { status: 201 });
 }
+

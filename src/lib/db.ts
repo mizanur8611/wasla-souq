@@ -158,6 +158,10 @@ function ensureSchema(): Promise<void> {
         status TEXT NOT NULL DEFAULT 'open',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
+      -- Phase 1 addition: customer order rating (restaurant + optional review text),
+      -- stored directly on the order rather than a separate reviews table at this scale.
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_rating INTEGER;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_review TEXT;
     `).then(() => undefined);
   }
   return schemaReady;
@@ -407,6 +411,8 @@ export async function getOrderById(orderId: string) {
     paymentMethod: order.payment_method,
     deliveryAddress: order.delivery_address,
     createdAt: order.created_at,
+    customerRating: order.customer_rating,
+    customerReview: order.customer_review,
     items: itemsRes.rows.map((r: any) => ({
       id: r.id,
       orderId: r.order_id,
@@ -626,5 +632,52 @@ export async function listDisputesForPartner(partnerId: string) {
     status: r.status,
     createdAt: r.created_at,
   }));
+}
+
+// ---------- Customer order history & rating (Phase 1) ----------
+
+export async function listOrdersForCustomer(customerId: string) {
+  await ensureSchema();
+  const ordersRes = await pool.query(
+    `SELECT o.*, p.name AS partner_name, p.name_ar AS partner_name_ar, p.hero_emoji AS partner_hero_emoji
+     FROM orders o
+     JOIN partners p ON p.id = o.partner_id
+     WHERE o.customer_id = $1
+     ORDER BY o.created_at DESC
+     LIMIT 50`,
+    [customerId]
+  );
+  const orders = [];
+  for (const order of ordersRes.rows) {
+    const itemsRes = await pool.query("SELECT * FROM order_items WHERE order_id = $1", [order.id]);
+    orders.push({
+      id: order.id,
+      status: order.status,
+      total: order.total,
+      partnerId: order.partner_id,
+      partnerName: order.partner_name,
+      partnerNameAr: order.partner_name_ar,
+      partnerHeroEmoji: order.partner_hero_emoji,
+      createdAt: order.created_at,
+      customerRating: order.customer_rating,
+      items: itemsRes.rows.map((r: any) => ({
+        catalogItemId: r.catalog_item_id,
+        name: r.name_snapshot,
+        quantity: r.quantity,
+        unitPrice: r.unit_price,
+      })),
+    });
+  }
+  return orders;
+}
+
+export async function submitOrderRating(orderId: string, rating: number, review?: string | null) {
+  await ensureSchema();
+  await pool.query("UPDATE orders SET customer_rating = $1, customer_review = $2 WHERE id = $3", [
+    rating,
+    review ?? null,
+    orderId,
+  ]);
+  return getOrderById(orderId);
 }
 

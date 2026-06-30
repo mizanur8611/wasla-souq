@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ShoppingCart, MapPin, Languages } from "lucide-react";
+import { ShoppingCart, MapPin, Languages, History, User } from "lucide-react";
 import { useCart } from "./CartContext";
 import { useLocale } from "./LocaleContext";
 
@@ -27,6 +27,22 @@ export default function Header() {
             <MapPin size={15} />
             {t("header.location")}
           </div>
+
+          <Link
+            href="/order/history"
+            className="hidden items-center justify-center rounded-full p-2 text-ink-soft transition hover:bg-paper sm:flex"
+            aria-label="Order history"
+          >
+            <History size={17} />
+          </Link>
+
+          <Link
+            href="/profile"
+            className="hidden items-center justify-center rounded-full p-2 text-ink-soft transition hover:bg-paper sm:flex"
+            aria-label="Profile"
+          >
+            <User size={17} />
+          </Link>
 
           <button
             type="button"

@@ -1,6 +1,7 @@
 "use client";
 
-import { CheckCircle2, Circle, XCircle } from "lucide-react";
+import { useState } from "react";
+import { CheckCircle2, Circle, XCircle, Star } from "lucide-react";
 import { useLocale } from "@/components/LocaleContext";
 
 const STEP_KEYS = [
@@ -20,6 +21,7 @@ interface OrderData {
   partner: { name: string; nameAr?: string | null };
   fulfilment: { riderName: string; etaMins: number } | null;
   items: { id: string; nameSnapshot: string; quantity: number; unitPrice: number }[];
+  customerRating?: number | null;
 }
 
 export default function OrderStatus({ order }: { order: OrderData }) {
@@ -49,6 +51,7 @@ export default function OrderStatus({ order }: { order: OrderData }) {
 
   const currentStepIndex = Math.max(STEP_KEYS.findIndex((s) => s === order.status), 0);
   const hasRider = !!order.fulfilment?.riderName;
+  const isDelivered = order.status === "delivered";
 
   return (
     <div>
@@ -103,6 +106,66 @@ export default function OrderStatus({ order }: { order: OrderData }) {
           <span className="font-mono">AED {order.total.toFixed(2)}</span>
         </div>
       </div>
+
+      {isDelivered && <RateOrder orderId={order.id} existingRating={order.customerRating} />}
+    </div>
+  );
+}
+
+function RateOrder({ orderId, existingRating }: { orderId: string; existingRating?: number | null }) {
+  const { t } = useLocale();
+  const [rating, setRating] = useState(existingRating || 0);
+  const [review, setReview] = useState("");
+  const [submitted, setSubmitted] = useState(!!existingRating);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit() {
+    if (!rating) return;
+    setSubmitting(true);
+    try {
+      await fetch(`/api/orders/${orderId}/rate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating, review }),
+      });
+      setSubmitted(true);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (submitted) {
+    return (
+      <div className="mt-5 rounded-2xl bg-tealsoft p-4 text-center text-sm font-semibold text-teal">
+        ✓ Thanks for rating this order {rating ? `(${rating}/5)` : ""}!
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5 rounded-2xl bg-paper p-4">
+      <div className="mb-1 font-display text-sm font-bold text-ink">{t("order.rate.title")}</div>
+      <p className="mb-3 text-xs text-muted">{t("order.rate.subtitle")}</p>
+      <div className="mb-3 flex justify-center gap-1">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button key={n} onClick={() => setRating(n)} aria-label={`${n} stars`}>
+            <Star size={28} className={n <= rating ? "fill-gold text-gold" : "text-line"} />
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={review}
+        onChange={(e) => setReview(e.target.value)}
+        placeholder={t("order.rate.placeholder")}
+        className="h-16 w-full rounded-xl border border-line bg-sand px-3 py-2.5 text-sm outline-none focus:border-gold"
+      />
+      <button
+        onClick={submit}
+        disabled={!rating || submitting}
+        className="mt-3 w-full rounded-xl bg-ink py-2.5 text-sm font-bold text-sand disabled:opacity-60"
+      >
+        {submitting ? "…" : t("order.rate.submit")}
+      </button>
     </div>
   );
 }

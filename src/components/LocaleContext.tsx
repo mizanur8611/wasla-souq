@@ -77,6 +77,20 @@ const dictionary: Record<string, { en: string; ar: string }> = {
   "order.step.rider_assigned": { en: "Rider assigned", ar: "تم تعيين السائق" },
   "order.step.on_the_way": { en: "On the way", ar: "في الطريق" },
   "order.step.delivered": { en: "Delivered", ar: "تم التوصيل" },
+  "order.rate.title": { en: "Rate this order", ar: "قيّم هذا الطلب" },
+  "order.rate.subtitle": { en: "How was the food and delivery?", ar: "كيف كانت الوجبة والتوصيل؟" },
+  "order.rate.placeholder": { en: "Leave a review (optional)…", ar: "اكتب تقييماً (اختياري)…" },
+  "order.rate.submit": { en: "Submit rating", ar: "إرسال التقييم" },
+  "history.title": { en: "Order History", ar: "سجل الطلبات" },
+  "history.empty": { en: "No past orders yet.", ar: "لا توجد طلبات سابقة بعد." },
+  "history.reorder": { en: "↻ Reorder", ar: "↻ إعادة الطلب" },
+  "history.viewOrder": { en: "View order", ar: "عرض الطلب" },
+  "profile.title": { en: "Profile", ar: "الملف الشخصي" },
+  "profile.addresses": { en: "Saved Addresses", ar: "العناوين المحفوظة" },
+  "profile.payment": { en: "Payment Methods", ar: "طرق الدفع" },
+  "profile.language": { en: "Language", ar: "اللغة" },
+  "profile.support": { en: "Help & Support", ar: "المساعدة والدعم" },
+  "profile.orders": { en: "Order History", ar: "سجل الطلبات" },
 };
 
 const LocaleContext = createContext<LocaleContextValue | null>(null);
