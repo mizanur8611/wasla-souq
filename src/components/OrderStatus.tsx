@@ -112,7 +112,11 @@ export default function OrderStatus({ order }: { order: OrderData }) {
           <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
             <Camera size={13} /> Delivery photo
           </div>
-          <img src={order.fulfilment.proofPhotoData} alt="Delivery proof" className="w-full rounded-xl" />
+          <img
+            src={order.fulfilment.proofPhotoData}
+            alt="Delivery proof"
+            className="max-h-72 w-full rounded-xl object-cover"
+          />
           {order.fulfilment.cashCollected && (
             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-teal">
               <Banknote size={13} /> Cash payment confirmed by rider

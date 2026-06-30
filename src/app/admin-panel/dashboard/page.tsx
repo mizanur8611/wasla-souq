@@ -845,7 +845,7 @@ function DeliveryProofViewer({ orderId }: { orderId: string }) {
           {loading && <p className="text-xs text-muted">Loading…</p>}
           {!loading && proof?.photoData && (
             <>
-              <img src={proof.photoData} alt="Delivery proof" className="w-full rounded-lg" />
+              <img src={proof.photoData} alt="Delivery proof" className="max-h-56 w-full rounded-lg object-cover" />
               {proof.cashCollected && (
                 <div className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-teal">
                   <Banknote size={11} /> Cash collection confirmed by {proof.riderName || "rider"}
