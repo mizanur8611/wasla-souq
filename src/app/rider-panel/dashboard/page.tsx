@@ -720,6 +720,20 @@ function HistoryView({ orders }: { orders: RiderOrder[] }) {
                     </span>
                   ) : null}
                 </div>
+                {o.status === "delivered" && (
+                  <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted">
+                    {o.hasProofPhoto && (
+                      <span className="inline-flex items-center gap-0.5 text-teal">
+                        <Camera size={10} /> Photo saved
+                      </span>
+                    )}
+                    {o.paymentMethod === "cash" && (
+                      <span className={`inline-flex items-center gap-0.5 ${o.cashCollected ? "text-teal" : "text-clay"}`}>
+                        <Banknote size={10} /> {o.cashCollected ? "Cash collected" : "Cash not confirmed"}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <div className="text-right">
