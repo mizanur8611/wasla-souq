@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import {
   LogOut,
   RefreshCw,
@@ -17,6 +18,8 @@ import {
   Ban,
   Plus,
 } from "lucide-react";
+
+const LiveMap = dynamic(() => import("@/components/LiveMap"), { ssr: false });
 
 interface OrderItem {
   name: string;
@@ -58,9 +61,14 @@ interface OnlineRider {
   email: string;
   vehicleType: string;
   ratingAvg: number;
+  lat: number | null;
+  lng: number | null;
+  locationAt: string | null;
   activeOrderId: string | null;
   activeOrderStatus: string | null;
   activeDeliveryAddress: string | null;
+  activeDeliveryLat: number | null;
+  activeDeliveryLng: number | null;
   activePartnerName: string | null;
 }
 interface Dispute {
@@ -323,12 +331,33 @@ function LiveRidersTab({ riders }: { riders: OnlineRider[] }) {
   if (riders.length === 0) {
     return <p className="text-sm text-muted">No riders are online right now.</p>;
   }
+
+  const withFix = riders.filter((r) => typeof r.lat === "number" && typeof r.lng === "number");
+  const mapCenter: [number, number] = withFix.length
+    ? [withFix[0].lat as number, withFix[0].lng as number]
+    : [25.0805, 55.1403]; // Dubai Marina fallback when no rider has reported a GPS fix yet
+
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted">
-        Real GPS pins aren't wired up yet (see roadmap, "GPS/Location feature") — this lists every online rider and
-        whatever delivery address they're currently assigned to as a text stand-in for a live map.
-      </p>
+      {withFix.length > 0 ? (
+        <LiveMap
+          center={mapCenter}
+          zoom={12}
+          pins={withFix.flatMap((r) => {
+            const pins = [{ lat: r.lat as number, lng: r.lng as number, emoji: "🛵", color: "#11645B", label: r.name }];
+            if (typeof r.activeDeliveryLat === "number" && typeof r.activeDeliveryLng === "number") {
+              pins.push({ lat: r.activeDeliveryLat, lng: r.activeDeliveryLng, emoji: "🏠", color: "#C68A3D", label: `${r.name}'s delivery` });
+            }
+            return pins;
+          })}
+        />
+      ) : (
+        <p className="text-xs text-muted">
+          No rider has shared a live GPS position yet — riders broadcast their location automatically once they go
+          online with location permission granted.
+        </p>
+      )}
+
       {riders.map((r) => (
         <div key={r.riderId} className="rounded-2xl bg-paper p-4">
           <div className="flex items-start justify-between">

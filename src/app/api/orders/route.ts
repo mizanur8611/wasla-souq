@@ -7,6 +7,8 @@ interface CreateOrderBody {
   deliveryAddress: string;
   paymentMethod: string;
   lines: { catalogItemId: string; quantity: number }[];
+  deliveryLat?: number | null;
+  deliveryLng?: number | null;
 }
 
 export const dynamic = "force-dynamic";
@@ -53,6 +55,8 @@ export async function POST(req: Request) {
     deliveryFee: breakdown.deliveryFee,
     serviceFee: breakdown.serviceFee,
     total: breakdown.total,
+    deliveryLat: typeof body.deliveryLat === "number" ? body.deliveryLat : null,
+    deliveryLng: typeof body.deliveryLng === "number" ? body.deliveryLng : null,
   });
 
   return NextResponse.json(order, { status: 201 });

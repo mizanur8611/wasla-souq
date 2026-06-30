@@ -1,6 +1,6 @@
 import { getOrderById } from "@/lib/db";
 import { notFound } from "next/navigation";
-import OrderStatus from "@/components/OrderStatus";
+import OrderTracker from "@/components/OrderTracker";
 
 export const dynamic = "force-dynamic";
 
@@ -9,5 +9,6 @@ export default async function OrderPage({ params }: { params: { id: string } }) 
 
   if (!order || !order.partner) notFound();
 
-  return <OrderStatus order={order as any} />;
+  return <OrderTracker orderId={params.id} initialOrder={order} />;
 }
+

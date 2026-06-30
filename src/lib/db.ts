@@ -185,6 +185,19 @@ function ensureSchema(): Promise<void> {
       ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolution TEXT;
       ALTER TABLE disputes ADD COLUMN IF NOT EXISTS refund_amount REAL;
       ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+
+      -- Phase 1 GPS/Location feature addition. delivery_lat/lng is the pin the customer
+      -- drops at checkout (map click or browser geolocation), stored alongside the
+      -- existing free-text delivery_address rather than replacing it — the text address
+      -- stays the human-readable label, the pin is what powers the map. rider_profiles
+      -- gets a "last known location" pair updated by the rider's own device while
+      -- online/on a delivery; this is genuinely live (no simulation), just coarse —
+      -- there's no location history table, only the latest fix.
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_lat REAL;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_lng REAL;
+      ALTER TABLE rider_profiles ADD COLUMN IF NOT EXISTS last_lat REAL;
+      ALTER TABLE rider_profiles ADD COLUMN IF NOT EXISTS last_lng REAL;
+      ALTER TABLE rider_profiles ADD COLUMN IF NOT EXISTS last_location_at TIMESTAMPTZ;
     `).then(() => undefined);
   }
   return schemaReady;
@@ -375,13 +388,15 @@ export async function createOrder(opts: {
   total: number;
   riderName?: string;
   etaMins?: number;
+  deliveryLat?: number | null;
+  deliveryLng?: number | null;
 }) {
   await ensureSchema();
   const orderId = id();
 
   await pool.query(
-    `INSERT INTO orders (id, vertical, customer_id, partner_id, status, subtotal, delivery_fee, service_fee, total, payment_method, delivery_address)
-     VALUES ($1,$2,$3,$4,'placed',$5,$6,$7,$8,$9,$10)`,
+    `INSERT INTO orders (id, vertical, customer_id, partner_id, status, subtotal, delivery_fee, service_fee, total, payment_method, delivery_address, delivery_lat, delivery_lng)
+     VALUES ($1,$2,$3,$4,'placed',$5,$6,$7,$8,$9,$10,$11,$12)`,
     [
       orderId,
       opts.vertical ?? "food",
@@ -393,6 +408,8 @@ export async function createOrder(opts: {
       opts.total,
       opts.paymentMethod,
       opts.deliveryAddress,
+      opts.deliveryLat ?? null,
+      opts.deliveryLng ?? null,
     ]
   );
 
@@ -418,7 +435,13 @@ export async function getOrderById(orderId: string) {
   const order = orderRes.rows[0];
 
   const itemsRes = await pool.query("SELECT * FROM order_items WHERE order_id = $1", [orderId]);
-  const fulfilmentRes = await pool.query("SELECT * FROM fulfilment_tasks WHERE order_id = $1", [orderId]);
+  const fulfilmentRes = await pool.query(
+    `SELECT f.*, rp.last_lat AS rider_last_lat, rp.last_lng AS rider_last_lng, rp.last_location_at AS rider_last_location_at
+     FROM fulfilment_tasks f
+     LEFT JOIN rider_profiles rp ON rp.user_id = f.rider_id
+     WHERE f.order_id = $1`,
+    [orderId]
+  );
   const partner = await getPartnerById(order.partner_id);
 
   return {
@@ -433,6 +456,8 @@ export async function getOrderById(orderId: string) {
     total: order.total,
     paymentMethod: order.payment_method,
     deliveryAddress: order.delivery_address,
+    deliveryLat: order.delivery_lat,
+    deliveryLng: order.delivery_lng,
     createdAt: order.created_at,
     customerRating: order.customer_rating,
     customerReview: order.customer_review,
@@ -451,6 +476,9 @@ export async function getOrderById(orderId: string) {
           riderName: fulfilmentRes.rows[0].rider_name,
           status: fulfilmentRes.rows[0].status,
           etaMins: fulfilmentRes.rows[0].eta_mins,
+          riderLat: fulfilmentRes.rows[0].rider_last_lat,
+          riderLng: fulfilmentRes.rows[0].rider_last_lng,
+          riderLocationAt: fulfilmentRes.rows[0].rider_last_location_at,
           updatedAt: fulfilmentRes.rows[0].updated_at,
         }
       : null,
@@ -761,6 +789,18 @@ export async function updateRiderVehicle(userId: string, vehicleType: string) {
   return getRiderProfile(userId);
 }
 
+// Written by the rider's own device (browser Geolocation API) every few seconds while
+// online — this is the rider's actual current position, not a simulation. Only the
+// latest fix is kept (no location-history table at this scale); customer order tracking
+// and the admin live-rider list both read it straight off rider_profiles.
+export async function updateRiderLocation(userId: string, lat: number, lng: number) {
+  await ensureSchema();
+  await pool.query(
+    "UPDATE rider_profiles SET last_lat = $1, last_lng = $2, last_location_at = now() WHERE user_id = $3",
+    [lat, lng, userId]
+  );
+}
+
 // Orders a rider can claim: the restaurant has marked them ready and no rider has taken
 // them yet. We don't have partner street addresses in Phase 1, so partner name + the
 // order's delivery address stand in for pickup/drop-off until a real address/GPS model
@@ -953,8 +993,8 @@ export async function listAllUsers() {
 export async function listOnlineRidersForAdmin() {
   await ensureSchema();
   const res = await pool.query(
-    `SELECT u.id, u.name, u.email, rp.vehicle_type, rp.rating_avg,
-            o.id AS order_id, o.status AS order_status, o.delivery_address, p.name AS partner_name
+    `SELECT u.id, u.name, u.email, rp.vehicle_type, rp.rating_avg, rp.last_lat, rp.last_lng, rp.last_location_at,
+            o.id AS order_id, o.status AS order_status, o.delivery_address, o.delivery_lat, o.delivery_lng, p.name AS partner_name
      FROM users u
      JOIN rider_profiles rp ON rp.user_id = u.id
      LEFT JOIN fulfilment_tasks f ON f.rider_id = u.id AND f.status IN ('assigned','picked_up','en_route')
@@ -969,9 +1009,14 @@ export async function listOnlineRidersForAdmin() {
     email: row.email,
     vehicleType: row.vehicle_type,
     ratingAvg: row.rating_avg,
+    lat: row.last_lat,
+    lng: row.last_lng,
+    locationAt: row.last_location_at,
     activeOrderId: row.order_id,
     activeOrderStatus: row.order_status,
     activeDeliveryAddress: row.delivery_address,
+    activeDeliveryLat: row.delivery_lat,
+    activeDeliveryLng: row.delivery_lng,
     activePartnerName: row.partner_name,
   }));
 }

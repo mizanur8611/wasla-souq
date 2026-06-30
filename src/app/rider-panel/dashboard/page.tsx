@@ -106,6 +106,38 @@ export default function RiderDashboard() {
     return () => clearInterval(interval);
   }, [loadProfile, loadOrders, loadEarnings]);
 
+  // Real-time location sharing: while the rider is online, their browser's actual GPS
+  // position is sent to the server every ~8s via watchPosition. This is genuinely live
+  // (not simulated) — it's what makes "Navigate" on the active delivery and the customer
+  // tracking map/admin live-rider map show the rider's real position. Stops immediately
+  // when the rider goes offline so nothing is sent in the background unnecessarily.
+  useEffect(() => {
+    if (!profile?.isOnline || !navigator.geolocation) return;
+
+    let lastSent = 0;
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const now = Date.now();
+        if (now - lastSent < 8000) return;
+        lastSent = now;
+        fetch("/api/rider/location", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        }).catch(() => {
+          // A dropped location ping just means the map is briefly stale — not worth
+          // surfacing as an error to the rider.
+        });
+      },
+      () => {
+        // Permission denied / unavailable — silently skip; the rider can still operate
+        // without live tracking, they just won't show on the map.
+      },
+      { enableHighAccuracy: true, maximumAge: 5000 }
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [profile?.isOnline]);
+
   async function toggleOnline() {
     if (!profile) return;
     const next = !profile.isOnline;
