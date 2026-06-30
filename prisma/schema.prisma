@@ -1,0 +1,177 @@
+// Wasla Souq — Phase 0 data model (canonical reference)
+//
+// This schema targets the SAME PostgreSQL database and the SAME table/column names that
+// src/lib/db.ts creates and queries directly via the `pg` driver (see that file's header
+// comment for why raw SQL is used at runtime instead of Prisma Client). The @@map / @map
+// directives below pin Prisma's defaults to those exact snake_case names, so running
+// `npx prisma db pull` against the running database — or simply switching db.ts's calls
+// for the generated Prisma Client — is a mechanical swap, not a redesign.
+//
+// Deliberately generic (Partner, not Restaurant; CatalogItem, not MenuItem; Order has a
+// `vertical` field) so Mart / Pharmacy / Courier can be added in Phase 1 by adding rows,
+// not by migrating these tables. See: Phase 0 Food-First Architecture document.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum PartnerType {
+  restaurant
+  grocery
+  pharmacy
+  courier_hub
+}
+
+enum PartnerStatus {
+  pending
+  approved
+  suspended
+}
+
+enum OrderVertical {
+  food
+  grocery
+  pharmacy
+  courier
+}
+
+enum OrderStatus {
+  placed
+  preparing
+  rider_assigned
+  picked_up
+  on_the_way
+  delivered
+  cancelled
+}
+
+model City {
+  id        String     @id @default(uuid())
+  name      String
+  country   String
+  currency  String // AED | SAR | QAR | KWD
+  partners  Partner[]
+  customers Customer[]
+
+  @@map("cities")
+}
+
+model Partner {
+  id             String        @id @default(uuid())
+  partnerType    PartnerType   @default(restaurant) @map("partner_type")
+  name           String
+  nameAr         String?       @map("name_ar")
+  cuisineTag     String?       @map("cuisine_tag")
+  city           City          @relation(fields: [cityId], references: [id])
+  cityId         String        @map("city_id")
+  commissionRate Float         @default(0.15) @map("commission_rate")
+  halalVerified  Boolean       @default(true) @map("halal_verified")
+  status         PartnerStatus @default(approved)
+  ratingAvg      Float         @default(4.5) @map("rating_avg")
+  etaMinsLow     Int           @default(20) @map("eta_mins_low")
+  etaMinsHigh    Int           @default(35) @map("eta_mins_high")
+  heroEmoji      String        @default("🍽️") @map("hero_emoji")
+  catalogItems   CatalogItem[]
+  orders         Order[]
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  @@map("partners")
+}
+
+model CatalogItem {
+  id          String      @id @default(uuid())
+  partner     Partner     @relation(fields: [partnerId], references: [id])
+  partnerId   String      @map("partner_id")
+  category    String // 'mains' today; 'dairy' / 'otc_medicine' etc. later — same column, new values
+  name        String
+  nameAr      String?     @map("name_ar")
+  description String?
+  price       Float
+  isAvailable Boolean     @default(true) @map("is_available")
+  orderItems  OrderItem[]
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  @@map("catalog_items")
+}
+
+model Customer {
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  phone         String?
+  city          City     @relation(fields: [cityId], references: [id])
+  cityId        String   @map("city_id")
+  loyaltyPoints Int      @default(0) @map("loyalty_points")
+  orders        Order[]
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("customers")
+}
+
+model Order {
+  id              String          @id @default(uuid())
+  vertical        OrderVertical   @default(food)
+  customer        Customer        @relation(fields: [customerId], references: [id])
+  customerId      String          @map("customer_id")
+  partner         Partner         @relation(fields: [partnerId], references: [id])
+  partnerId       String          @map("partner_id")
+  status          OrderStatus     @default(placed)
+  subtotal        Float
+  deliveryFee     Float           @map("delivery_fee")
+  serviceFee      Float           @map("service_fee")
+  total           Float
+  paymentMethod   String          @default("card") @map("payment_method")
+  deliveryAddress String          @map("delivery_address")
+  items           OrderItem[]
+  fulfilment      FulfilmentTask?
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id            String       @id @default(uuid())
+  order         Order        @relation(fields: [orderId], references: [id])
+  orderId       String       @map("order_id")
+  catalogItem   CatalogItem? @relation(fields: [catalogItemId], references: [id])
+  catalogItemId String?      @map("catalog_item_id")
+  nameSnapshot  String       @map("name_snapshot") // name captured at order time, so later menu edits don't rewrite history
+  quantity      Int
+  unitPrice     Float        @map("unit_price")
+
+  @@map("order_items")
+}
+
+model FulfilmentTask {
+  id        String   @id @default(uuid())
+  order     Order    @relation(fields: [orderId], references: [id])
+  orderId   String   @unique @map("order_id")
+  riderName String?  @map("rider_name")
+  status    String   @default("unassigned") // unassigned | assigned | picked_up | en_route | delivered
+  etaMins   Int      @default(25) @map("eta_mins")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("fulfilment_tasks")
+}
+
+// Phase 1 addition: real authentication for restaurant owners and admins.
+// partnerId is only set for restaurant_owner accounts. See Full Platform Specification,
+// Section 8, for the rest of the Phase 1 tables this will grow alongside (rider_profiles,
+// rider_locations, disputes, etc.) as those panels are built.
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         String // 'admin' | 'restaurant_owner'
+  name         String
+  partner      Partner?  @relation(fields: [partnerId], references: [id])
+  partnerId    String?   @map("partner_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@map("users")
+}
