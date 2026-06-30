@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
@@ -17,11 +17,22 @@ import {
   Bike,
   Truck,
   Car,
+  X,
+  Headset,
+  Camera,
+  Banknote,
+  Star,
+  ArrowDownToLine,
 } from "lucide-react";
 
 const LiveMap = dynamic(() => import("@/components/LiveMap"), { ssr: false });
 
 import { distanceKm, formatDistanceEta } from "@/lib/geo";
+
+interface OrderLineItem {
+  name: string;
+  quantity: number;
+}
 
 interface RiderOrder {
   id: string;
@@ -31,11 +42,16 @@ interface RiderOrder {
   deliveryAddress: string;
   deliveryLat: number | null;
   deliveryLng: number | null;
+  paymentMethod?: string;
+  customerRating?: number | null;
+  cashCollected?: boolean;
+  hasProofPhoto?: boolean;
   partnerName: string;
   partnerHeroEmoji: string;
   partnerLat: number | null;
   partnerLng: number | null;
   createdAt: string;
+  items?: OrderLineItem[];
 }
 
 interface RiderProfile {
@@ -45,6 +61,16 @@ interface RiderProfile {
   vehicleType: string;
   isOnline: boolean;
   ratingAvg: number;
+  deliveriesAccepted: number;
+  deliveriesDeclined: number;
+  acceptanceRate: number;
+}
+
+interface Payout {
+  id: string;
+  amount: number;
+  deliveriesCount: number;
+  createdAt: string;
 }
 
 interface Earnings {
@@ -52,6 +78,9 @@ interface Earnings {
   totalDeliveries: number;
   today: { earnings: number; deliveries: number };
   week: { earnings: number; deliveries: number };
+  availableToWithdraw: number;
+  availableDeliveries: number;
+  recentPayouts: Payout[];
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -167,7 +196,7 @@ export default function RiderDashboard() {
     try {
       const res = await fetch(`/api/rider/orders/${orderId}/accept`, { method: "POST" });
       if (!res.ok) throw new Error((await res.json()).error || "Could not accept this delivery");
-      await loadOrders();
+      await Promise.all([loadOrders(), loadProfile()]);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -175,14 +204,27 @@ export default function RiderDashboard() {
     }
   }
 
-  async function advance(orderId: string, newStatus: string) {
+  async function declineOrder(orderId: string) {
+    // The order itself isn't touched (another rider can still take it) — this just logs
+    // the decline against the rider's acceptance rate and drops it from this rider's view.
+    setActingOn(orderId);
+    try {
+      await fetch(`/api/rider/orders/${orderId}/decline`, { method: "POST" });
+      setAvailable((prev) => (prev ? prev.filter((o) => o.id !== orderId) : prev));
+      await loadProfile();
+    } finally {
+      setActingOn(null);
+    }
+  }
+
+  async function advance(orderId: string, newStatus: string, opts?: { photoData?: string; cashCollected?: boolean }) {
     setActingOn(orderId);
     setError(null);
     try {
       const res = await fetch(`/api/rider/orders/${orderId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: newStatus, ...opts }),
       });
       if (!res.ok) throw new Error((await res.json()).error || "Could not update delivery");
       await Promise.all([loadOrders(), loadEarnings()]);
@@ -214,6 +256,16 @@ export default function RiderDashboard() {
             <div className="text-xs text-muted">{TAB_LABEL[tab]}</div>
           </div>
           <div className="flex items-center gap-2">
+            <span className="hidden items-center gap-1 rounded-full bg-sanddeep px-2.5 py-1 text-[11px] font-bold text-ink sm:flex">
+              {profile.acceptanceRate}% acceptance
+            </span>
+            <a
+              href="mailto:support@waslasouq.com"
+              className="flex items-center gap-1 rounded-full bg-sanddeep px-3 py-1.5 text-xs font-semibold text-ink"
+              title="Contact rider support"
+            >
+              <Headset size={13} />
+            </a>
             <button
               onClick={toggleOnline}
               className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
@@ -318,13 +370,22 @@ export default function RiderDashboard() {
                           </div>
                         )}
 
-                        <button
-                          onClick={() => acceptOrder(o.id)}
-                          disabled={actingOn === o.id}
-                          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-ink py-2.5 text-sm font-bold text-sand disabled:opacity-60"
-                        >
-                          <CheckCircle2 size={15} /> Accept delivery
-                        </button>
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            onClick={() => declineOrder(o.id)}
+                            disabled={actingOn === o.id}
+                            className="flex items-center justify-center gap-1.5 rounded-xl bg-claysoft px-4 py-2.5 text-sm font-bold text-clay disabled:opacity-60"
+                          >
+                            <X size={15} /> Decline
+                          </button>
+                          <button
+                            onClick={() => acceptOrder(o.id)}
+                            disabled={actingOn === o.id}
+                            className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-ink py-2.5 text-sm font-bold text-sand disabled:opacity-60"
+                          >
+                            <CheckCircle2 size={15} /> Accept delivery
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -333,7 +394,7 @@ export default function RiderDashboard() {
             )}
           </>
         ) : tab === "earnings" ? (
-          <EarningsView earnings={earnings} />
+          <EarningsView earnings={earnings} onWithdrawn={loadEarnings} />
         ) : tab === "history" ? (
           <HistoryView orders={history} />
         ) : (
@@ -352,7 +413,7 @@ function ActiveDeliveryCard({
 }: {
   order: RiderOrder;
   actingOn: string | null;
-  onAdvance: (orderId: string, newStatus: string) => void;
+  onAdvance: (orderId: string, newStatus: string, opts?: { photoData?: string; cashCollected?: boolean }) => void;
   myPosition: [number, number] | null;
 }) {
   const headingToRestaurant = order.status === "rider_assigned";
@@ -375,6 +436,13 @@ function ActiveDeliveryCard({
       )}`;
 
   const legKm = myPosition && hasDest ? distanceKm(myPosition[0], myPosition[1], destLat as number, destLng as number) : null;
+
+  // R4: item checklist — a rider must tick every item before "Confirm pickup" unlocks,
+  // so a missing item gets caught at the restaurant counter rather than discovered after
+  // they've already left.
+  const [checked, setChecked] = useState<Record<number, boolean>>({});
+  const items = order.items ?? [];
+  const allChecked = items.length === 0 || items.every((_, i) => checked[i]);
 
   return (
     <div className="rounded-2xl bg-paper p-4">
@@ -420,14 +488,33 @@ function ActiveDeliveryCard({
         <Navigation size={15} /> Navigate
       </a>
 
+      {headingToRestaurant && items.length > 0 && (
+        <div className="mt-3 rounded-xl bg-sand p-3">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Check items before pickup</div>
+          <div className="space-y-1.5">
+            {items.map((it, i) => (
+              <label key={i} className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={!!checked[i]}
+                  onChange={(e) => setChecked((prev) => ({ ...prev, [i]: e.target.checked }))}
+                  className="h-4 w-4 accent-teal"
+                />
+                {it.name} × {it.quantity}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mt-2">
         {order.status === "rider_assigned" && (
           <button
             onClick={() => onAdvance(order.id, "picked_up")}
-            disabled={actingOn === order.id}
+            disabled={actingOn === order.id || !allChecked}
             className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-ink py-2.5 text-sm font-bold text-sand disabled:opacity-60"
           >
-            <Package size={15} /> Confirm pickup
+            <Package size={15} /> {allChecked ? "Confirm pickup" : "Check all items first"}
           </button>
         )}
         {order.status === "picked_up" && (
@@ -440,20 +527,118 @@ function ActiveDeliveryCard({
           </button>
         )}
         {order.status === "on_the_way" && (
-          <button
-            onClick={() => onAdvance(order.id, "delivered")}
-            disabled={actingOn === order.id}
-            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-teal py-2.5 text-sm font-bold text-white disabled:opacity-60"
-          >
-            <CheckCircle2 size={15} /> Confirm delivery
-          </button>
+          <DeliveryConfirmPanel order={order} actingOn={actingOn} onAdvance={onAdvance} />
         )}
       </div>
     </div>
   );
 }
 
-function EarningsView({ earnings }: { earnings: Earnings | null }) {
+// R6: proof-of-delivery photo + cash-collection confirmation, gating "Mark as delivered".
+// The photo is resized client-side before upload (max ~800px wide, JPEG) since it's
+// stored directly as a base64 column in Postgres — there's no object-storage service
+// (S3 etc.) wired up yet for this Phase 1 pass.
+function DeliveryConfirmPanel({
+  order,
+  actingOn,
+  onAdvance,
+}: {
+  order: RiderOrder;
+  actingOn: string | null;
+  onAdvance: (orderId: string, newStatus: string, opts?: { photoData?: string; cashCollected?: boolean }) => void;
+}) {
+  const [photoData, setPhotoData] = useState<string | null>(null);
+  const [cashCollected, setCashCollected] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const isCash = order.paymentMethod === "cash";
+  const canConfirm = !!photoData && (!isCash || cashCollected);
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProcessing(true);
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = () => {
+        const maxW = 800;
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        setPhotoData(canvas.toDataURL("image/jpeg", 0.6));
+        setProcessing(false);
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl bg-sand p-3">
+      <div>
+        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Proof of delivery</div>
+        {photoData ? (
+          <div className="relative">
+            <img src={photoData} alt="Delivery proof" className="w-full rounded-lg" />
+            <button
+              onClick={() => setPhotoData(null)}
+              className="absolute right-2 top-2 rounded-full bg-ink/80 p-1 text-white"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={processing}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-line bg-paper py-3 text-sm font-semibold text-muted disabled:opacity-60"
+          >
+            <Camera size={16} /> {processing ? "Processing…" : "Take photo"}
+          </button>
+        )}
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFile} className="hidden" />
+      </div>
+
+      {isCash && (
+        <label className="flex items-center gap-2 rounded-xl bg-goldsoft p-2.5 text-sm font-semibold text-[#8a611f]">
+          <input type="checkbox" checked={cashCollected} onChange={(e) => setCashCollected(e.target.checked)} className="h-4 w-4 accent-gold" />
+          <Banknote size={15} /> Cash collected: AED {order.total.toFixed(2)}
+        </label>
+      )}
+
+      <button
+        onClick={() => onAdvance(order.id, "delivered", { photoData: photoData ?? undefined, cashCollected })}
+        disabled={actingOn === order.id || !canConfirm}
+        className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-teal py-2.5 text-sm font-bold text-white disabled:opacity-60"
+      >
+        <CheckCircle2 size={15} /> {canConfirm ? "Mark as delivered" : "Photo required" + (isCash ? " · confirm cash" : "")}
+      </button>
+    </div>
+  );
+}
+
+function EarningsView({ earnings, onWithdrawn }: { earnings: Earnings | null; onWithdrawn: () => void }) {
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+
+  async function withdraw() {
+    setWithdrawing(true);
+    setWithdrawError(null);
+    try {
+      const res = await fetch("/api/rider/payouts", { method: "POST" });
+      if (!res.ok) throw new Error((await res.json()).error || "Could not withdraw");
+      onWithdrawn();
+    } catch (e: any) {
+      setWithdrawError(e.message);
+    } finally {
+      setWithdrawing(false);
+    }
+  }
+
   if (!earnings) return <p className="text-sm text-muted">Loading…</p>;
   return (
     <div className="space-y-4">
@@ -469,16 +654,48 @@ function EarningsView({ earnings }: { earnings: Earnings | null }) {
           <div className="text-xs text-muted">{earnings.week.deliveries} deliveries</div>
         </div>
       </div>
+
       <div className="rounded-2xl bg-ink p-5 text-sand">
         <div className="flex items-center gap-1.5 text-xs text-sand/70">
-          <Wallet size={13} /> Total earned
+          <Wallet size={13} /> Available to withdraw
         </div>
-        <div className="mt-1 font-display text-2xl font-bold">AED {earnings.totalEarnings.toFixed(2)}</div>
-        <div className="mt-1 text-xs text-sand/70">{earnings.totalDeliveries} deliveries completed all-time</div>
+        <div className="mt-1 font-display text-2xl font-bold">AED {earnings.availableToWithdraw.toFixed(2)}</div>
+        <div className="mt-1 text-xs text-sand/70">{earnings.availableDeliveries} deliveries since last payout</div>
+        {withdrawError && <p className="mt-2 text-xs font-semibold text-clay">{withdrawError}</p>}
+        <button
+          onClick={withdraw}
+          disabled={withdrawing || earnings.availableToWithdraw <= 0}
+          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-gold py-2.5 text-sm font-bold text-ink disabled:opacity-50"
+        >
+          <ArrowDownToLine size={15} /> {withdrawing ? "Processing…" : "Withdraw earnings"}
+        </button>
       </div>
+
+      <div className="rounded-2xl bg-paper p-4">
+        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Recent payouts</div>
+        {earnings.recentPayouts.length === 0 && <p className="text-sm text-muted">No payouts yet.</p>}
+        <div className="space-y-2">
+          {earnings.recentPayouts.map((p) => (
+            <div key={p.id} className="flex items-center justify-between text-sm">
+              <div>
+                <div className="font-semibold text-ink">Weekly payout</div>
+                <div className="text-xs text-muted">{new Date(p.createdAt).toLocaleDateString()} · {p.deliveriesCount} deliveries</div>
+              </div>
+              <span className="font-mono font-bold text-ink">AED {p.amount.toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-sanddeep p-4">
+        <div className="text-xs text-muted">Total earned (all-time)</div>
+        <div className="mt-1 font-display text-lg font-bold text-ink">AED {earnings.totalEarnings.toFixed(2)}</div>
+        <div className="text-xs text-muted">{earnings.totalDeliveries} deliveries completed all-time</div>
+      </div>
+
       <p className="text-[11px] text-muted">
-        Earnings shown here are the delivery fee from each completed order. Payout/withdrawal isn't wired up yet — this
-        is a running total only.
+        No real bank/payout rail is connected yet — "Withdraw" records a payout request as a paper trail, the same
+        way Admin Panel refunds are logged, rather than moving real money.
       </p>
     </div>
   );
@@ -495,7 +712,14 @@ function HistoryView({ orders }: { orders: RiderOrder[] }) {
               <span className="text-lg">{o.partnerHeroEmoji}</span>
               <div>
                 <div className="text-sm font-bold text-ink">{o.partnerName}</div>
-                <div className="text-xs text-muted">{new Date(o.createdAt).toLocaleString()}</div>
+                <div className="text-xs text-muted">
+                  {new Date(o.createdAt).toLocaleString()}
+                  {o.status === "delivered" && o.customerRating ? (
+                    <span className="ml-1.5 inline-flex items-center gap-0.5 text-gold">
+                      <Star size={11} className="fill-gold" /> {o.customerRating.toFixed(1)} from customer
+                    </span>
+                  ) : null}
+                </div>
               </div>
             </div>
             <div className="text-right">
