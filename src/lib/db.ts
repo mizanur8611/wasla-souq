@@ -31,6 +31,27 @@ const pool = new Pool({
   max: useSSL ? 3 : 10,
 });
 
+// Vercel runs every request on its own serverless function, and several screens here
+// (rider dashboard's profile+orders+earnings on mount, admin dashboard's seven parallel
+// tab fetches) fire multiple concurrent requests that each open a fresh DB connection.
+// Concurrent UPDATEs touching the same rows in different table order — or, at cold start,
+// concurrent runs of the ALTER TABLE migration below — can trigger a genuine Postgres
+// deadlock (error code 40P01) or serialization failure (40001). Both are expected and
+// transient under concurrency, not bugs in the query itself, so every query gets one
+// automatic short-backoff retry here instead of surfacing "deadlock detected" to the user.
+const rawQuery = pool.query.bind(pool);
+(pool as any).query = async function patchedQuery(...args: any[]) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await (rawQuery as any)(...args);
+    } catch (err: any) {
+      const transient = err?.code === "40P01" || err?.code === "40001";
+      if (!transient || attempt === 2) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 60 + Math.random() * 180));
+    }
+  }
+};
+
 let schemaReady: Promise<void> | null = null;
 
 function ensureSchema(): Promise<void> {
@@ -1114,4 +1135,5 @@ export async function getPlatformAnalytics() {
     },
   };
 }
+
 
