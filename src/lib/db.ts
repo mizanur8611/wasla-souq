@@ -232,6 +232,25 @@ function ensureSchema(): Promise<void> {
       UPDATE partners SET lat = 25.0763, lng = 55.1339 WHERE name = 'Saffron & Sumac' AND lat IS NULL;
       UPDATE partners SET lat = 25.0890, lng = 55.1478 WHERE name = 'Karak Corner' AND lat IS NULL;
       UPDATE partners SET lat = 25.0717, lng = 55.1281 WHERE name = 'Bait Al Shawarma' AND lat IS NULL;
+
+      -- Phase 1 Rider App additions: acceptance rate (R1), proof-of-delivery photo + cash
+      -- collection confirmation (R6), and a simple payout ledger (R7). deliveries_accepted/
+      -- declined are counters, not a log — enough for a percentage, not a full audit trail.
+      -- proof_photo_data is a base64 data URL straight in Postgres (resized client-side to
+      -- keep it small) since there's no object-storage service (S3 etc.) wired up yet.
+      ALTER TABLE rider_profiles ADD COLUMN IF NOT EXISTS deliveries_accepted INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE rider_profiles ADD COLUMN IF NOT EXISTS deliveries_declined INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE rider_profiles ADD COLUMN IF NOT EXISTS last_payout_at TIMESTAMPTZ NOT NULL DEFAULT now();
+      ALTER TABLE fulfilment_tasks ADD COLUMN IF NOT EXISTS proof_photo_data TEXT;
+      ALTER TABLE fulfilment_tasks ADD COLUMN IF NOT EXISTS cash_collected BOOLEAN NOT NULL DEFAULT false;
+
+      CREATE TABLE IF NOT EXISTS rider_payouts (
+        id UUID PRIMARY KEY,
+        rider_id UUID NOT NULL REFERENCES users(id),
+        amount REAL NOT NULL,
+        deliveries_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
     `).then(() => undefined);
   }
   return schemaReady;
@@ -771,6 +790,9 @@ export async function submitOrderRating(orderId: string, rating: number, review?
 // ---------- Rider App (Phase 1) ----------
 
 function toRiderProfileShape(row: any) {
+  const accepted = row.deliveries_accepted ?? 0;
+  const declined = row.deliveries_declined ?? 0;
+  const total = accepted + declined;
   return {
     userId: row.id ?? row.user_id,
     name: row.name,
@@ -778,6 +800,10 @@ function toRiderProfileShape(row: any) {
     vehicleType: row.vehicle_type,
     isOnline: row.is_online,
     ratingAvg: row.rating_avg,
+    deliveriesAccepted: accepted,
+    deliveriesDeclined: declined,
+    // No data yet → show 100% rather than 0%, since 0 offers shouldn't read as a bad record.
+    acceptanceRate: total === 0 ? 100 : Math.round((accepted / total) * 100),
   };
 }
 
@@ -799,7 +825,8 @@ export async function ensureRiderProfile(userId: string) {
 export async function getRiderProfile(userId: string) {
   await ensureSchema();
   const res = await pool.query(
-    `SELECT u.id, u.name, u.email, rp.vehicle_type, rp.is_online, rp.rating_avg
+    `SELECT u.id, u.name, u.email, rp.vehicle_type, rp.is_online, rp.rating_avg,
+            rp.deliveries_accepted, rp.deliveries_declined
      FROM users u JOIN rider_profiles rp ON rp.user_id = u.id WHERE u.id = $1`,
     [userId]
   );
@@ -870,7 +897,8 @@ export async function listAvailableOrdersForRiders() {
 export async function listOrdersForRider(riderId: string) {
   await ensureSchema();
   const res = await pool.query(
-    `SELECT o.*, p.name AS partner_name, p.hero_emoji AS partner_hero_emoji, p.lat AS partner_lat, p.lng AS partner_lng
+    `SELECT o.*, p.name AS partner_name, p.hero_emoji AS partner_hero_emoji, p.lat AS partner_lat, p.lng AS partner_lng,
+            f.cash_collected, (f.proof_photo_data IS NOT NULL) AS has_proof_photo
      FROM orders o
      JOIN partners p ON p.id = o.partner_id
      JOIN fulfilment_tasks f ON f.order_id = o.id
@@ -878,20 +906,30 @@ export async function listOrdersForRider(riderId: string) {
      ORDER BY o.created_at DESC LIMIT 100`,
     [riderId]
   );
-  return res.rows.map((order: any) => ({
-    id: order.id,
-    status: order.status,
-    total: order.total,
-    deliveryFee: order.delivery_fee,
-    deliveryAddress: order.delivery_address,
-    deliveryLat: order.delivery_lat,
-    deliveryLng: order.delivery_lng,
-    partnerName: order.partner_name,
-    partnerHeroEmoji: order.partner_hero_emoji,
-    partnerLat: order.partner_lat,
-    partnerLng: order.partner_lng,
-    createdAt: order.created_at,
-  }));
+  const orders = [];
+  for (const order of res.rows) {
+    const itemsRes = await pool.query("SELECT name_snapshot, quantity FROM order_items WHERE order_id = $1", [order.id]);
+    orders.push({
+      id: order.id,
+      status: order.status,
+      total: order.total,
+      deliveryFee: order.delivery_fee,
+      deliveryAddress: order.delivery_address,
+      deliveryLat: order.delivery_lat,
+      deliveryLng: order.delivery_lng,
+      paymentMethod: order.payment_method,
+      customerRating: order.customer_rating,
+      cashCollected: order.cash_collected,
+      hasProofPhoto: order.has_proof_photo,
+      partnerName: order.partner_name,
+      partnerHeroEmoji: order.partner_hero_emoji,
+      partnerLat: order.partner_lat,
+      partnerLng: order.partner_lng,
+      createdAt: order.created_at,
+      items: itemsRes.rows.map((r: any) => ({ name: r.name_snapshot, quantity: r.quantity })),
+    });
+  }
+  return orders;
 }
 
 // A rider claims an unassigned, ready order. Race-safe via the `rider_id IS NULL` guard:
@@ -907,7 +945,16 @@ export async function assignRiderToOrder(orderId: string, riderId: string, rider
   );
   if (!res.rows.length) return null;
   await pool.query("UPDATE orders SET status = 'rider_assigned' WHERE id = $1", [orderId]);
+  await pool.query("UPDATE rider_profiles SET deliveries_accepted = deliveries_accepted + 1 WHERE user_id = $1", [riderId]);
   return getOrderById(orderId);
+}
+
+// A rider tapped "Decline" on an offered delivery. The order itself isn't touched — it
+// stays available for another rider — this only logs the decline against this rider's
+// acceptance-rate counter (R1).
+export async function recordRiderDecline(riderId: string) {
+  await ensureSchema();
+  await pool.query("UPDATE rider_profiles SET deliveries_declined = deliveries_declined + 1 WHERE user_id = $1", [riderId]);
 }
 
 const RIDER_ALLOWED_TRANSITIONS: Record<string, string[]> = {
@@ -927,7 +974,12 @@ const RIDER_FULFILMENT_STATUS: Record<string, string> = {
 // rider-owned portion of the lifecycle (rider_assigned -> picked_up -> on_the_way ->
 // delivered) and checked against fulfilment_tasks.rider_id so a rider can only move
 // deliveries they themselves claimed.
-export async function updateRiderOrderStatus(orderId: string, riderId: string, newStatus: string) {
+export async function updateRiderOrderStatus(
+  orderId: string,
+  riderId: string,
+  newStatus: string,
+  opts?: { photoData?: string | null; cashCollected?: boolean }
+) {
   await ensureSchema();
   const fRes = await pool.query("SELECT * FROM fulfilment_tasks WHERE order_id = $1", [orderId]);
   if (!fRes.rows.length || fRes.rows[0].rider_id !== riderId) return null;
@@ -941,10 +993,13 @@ export async function updateRiderOrderStatus(orderId: string, riderId: string, n
   }
 
   await pool.query("UPDATE orders SET status = $1 WHERE id = $2", [newStatus, orderId]);
-  await pool.query("UPDATE fulfilment_tasks SET status = $1, updated_at = now() WHERE order_id = $2", [
-    RIDER_FULFILMENT_STATUS[newStatus] ?? newStatus,
-    orderId,
-  ]);
+  await pool.query(
+    `UPDATE fulfilment_tasks SET status = $1, updated_at = now(),
+       proof_photo_data = COALESCE($2, proof_photo_data),
+       cash_collected = COALESCE($3, cash_collected)
+     WHERE order_id = $4`,
+    [RIDER_FULFILMENT_STATUS[newStatus] ?? newStatus, opts?.photoData ?? null, opts?.cashCollected ?? null, orderId]
+  );
   return getOrderById(orderId);
 }
 
@@ -971,12 +1026,64 @@ export async function getRiderEarnings(riderId: string) {
      WHERE f.rider_id = $1 AND o.status = 'delivered' AND o.created_at >= now() - interval '7 days'`,
     [riderId]
   );
+
+  const riderRes = await pool.query("SELECT last_payout_at FROM rider_profiles WHERE user_id = $1", [riderId]);
+  const lastPayoutAt = riderRes.rows[0]?.last_payout_at ?? null;
+  const availableRes = await pool.query(
+    `SELECT COUNT(*)::int AS delivery_count, COALESCE(SUM(o.delivery_fee),0)::float AS earnings
+     FROM orders o JOIN fulfilment_tasks f ON f.order_id = o.id
+     WHERE f.rider_id = $1 AND o.status = 'delivered' AND o.created_at > $2`,
+    [riderId, lastPayoutAt]
+  );
+  const payoutsRes = await pool.query(
+    "SELECT id, amount, deliveries_count, created_at FROM rider_payouts WHERE rider_id = $1 ORDER BY created_at DESC LIMIT 10",
+    [riderId]
+  );
+
   return {
     totalEarnings: totalsRes.rows[0].total_earnings,
     totalDeliveries: totalsRes.rows[0].delivery_count,
     today: { earnings: todayRes.rows[0].earnings, deliveries: todayRes.rows[0].delivery_count },
     week: { earnings: weekRes.rows[0].earnings, deliveries: weekRes.rows[0].delivery_count },
+    availableToWithdraw: availableRes.rows[0].earnings,
+    availableDeliveries: availableRes.rows[0].delivery_count,
+    recentPayouts: payoutsRes.rows.map((r: any) => ({
+      id: r.id,
+      amount: r.amount,
+      deliveriesCount: r.deliveries_count,
+      createdAt: r.created_at,
+    })),
   };
+}
+
+// R7: "Withdraw earnings". No real bank/payout rail is connected (see README, "Known
+// items before production" — payment is a mock selector with no PSP called) so this
+// records a payout request and resets the available-balance window, the same manual
+// paper-trail approach the Admin Panel's dispute refunds use, rather than moving real
+// money.
+export async function requestRiderPayout(riderId: string) {
+  await ensureSchema();
+  const riderRes = await pool.query("SELECT last_payout_at FROM rider_profiles WHERE user_id = $1", [riderId]);
+  if (!riderRes.rows.length) throw new Error("Rider not found");
+  const lastPayoutAt = riderRes.rows[0].last_payout_at;
+
+  const availableRes = await pool.query(
+    `SELECT COUNT(*)::int AS delivery_count, COALESCE(SUM(o.delivery_fee),0)::float AS earnings
+     FROM orders o JOIN fulfilment_tasks f ON f.order_id = o.id
+     WHERE f.rider_id = $1 AND o.status = 'delivered' AND o.created_at > $2`,
+    [riderId, lastPayoutAt]
+  );
+  const amount = availableRes.rows[0].earnings;
+  const count = availableRes.rows[0].delivery_count;
+  if (amount <= 0) throw new Error("Nothing available to withdraw yet");
+
+  const payoutId = id();
+  await pool.query(
+    "INSERT INTO rider_payouts (id, rider_id, amount, deliveries_count) VALUES ($1,$2,$3,$4)",
+    [payoutId, riderId, amount, count]
+  );
+  await pool.query("UPDATE rider_profiles SET last_payout_at = now() WHERE user_id = $1", [riderId]);
+  return { id: payoutId, amount, deliveriesCount: count };
 }
 
 
@@ -1158,4 +1265,6 @@ export async function getPlatformAnalytics() {
     },
   };
 }
+
+
 

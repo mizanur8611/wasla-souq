@@ -10,10 +10,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: "Not authorized" }, { status: 401 });
   }
 
-  const { status: newStatus } = await req.json();
+  const { status: newStatus, photoData, cashCollected } = await req.json();
 
   try {
-    const updated = await updateRiderOrderStatus(params.id, session.userId, newStatus);
+    const updated = await updateRiderOrderStatus(params.id, session.userId, newStatus, { photoData, cashCollected });
     if (!updated) {
       return NextResponse.json({ error: "Order not found or not assigned to you" }, { status: 404 });
     }
@@ -22,3 +22,4 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     return NextResponse.json({ error: e.message }, { status: 400 });
   }
 }
+
