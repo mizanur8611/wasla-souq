@@ -57,6 +57,7 @@ function ensureSchema(): Promise<void> {
         eta_mins_low INTEGER NOT NULL DEFAULT 20,
         eta_mins_high INTEGER NOT NULL DEFAULT 35,
         hero_emoji TEXT NOT NULL DEFAULT '🍽️',
+        image_url TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
 
@@ -69,6 +70,7 @@ function ensureSchema(): Promise<void> {
         description TEXT,
         price REAL NOT NULL,
         is_available BOOLEAN NOT NULL DEFAULT true,
+        image_url TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
 
@@ -129,6 +131,21 @@ function ensureSchema(): Promise<void> {
         partner_id UUID REFERENCES partners(id),
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
+      -- Phase 1 addition: real food photos. CREATE TABLE IF NOT EXISTS above only applies to
+      -- brand-new databases, so existing deployed tables need these columns added explicitly.
+      ALTER TABLE partners ADD COLUMN IF NOT EXISTS image_url TEXT;
+      ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+      -- One-time backfill for the four Phase 0 demo restaurants seeded before image_url
+      -- existed. Safe to run every boot: each UPDATE only touches rows still missing a photo.
+      UPDATE partners SET image_url = 'https://loremflickr.com/600/400/mandi,rice,arabic'
+        WHERE name = 'Saffron & Sumac' AND image_url IS NULL;
+      UPDATE partners SET image_url = 'https://loremflickr.com/600/400/kebab,grill,middleeast'
+        WHERE name = 'Manqal Grill House' AND image_url IS NULL;
+      UPDATE partners SET image_url = 'https://loremflickr.com/600/400/karak,tea'
+        WHERE name = 'Karak Corner' AND image_url IS NULL;
+      UPDATE partners SET image_url = 'https://loremflickr.com/600/400/shawarma'
+        WHERE name = 'Bait Al Shawarma' AND image_url IS NULL;
     `).then(() => undefined);
   }
   return schemaReady;
@@ -277,6 +294,7 @@ function toPartnerShape(row: any) {
     etaMinsLow: row.eta_mins_low,
     etaMinsHigh: row.eta_mins_high,
     heroEmoji: row.hero_emoji,
+    heroImageUrl: row.image_url,
     createdAt: row.created_at,
   };
 }
@@ -291,6 +309,7 @@ function toCatalogItemShape(row: any) {
     description: row.description,
     price: row.price,
     isAvailable: row.is_available,
+    imageUrl: row.image_url,
     createdAt: row.created_at,
   };
 }

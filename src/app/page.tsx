@@ -20,6 +20,7 @@ export default async function HomePage() {
             nameAr={p.nameAr}
             cuisineTag={p.cuisineTag}
             heroEmoji={p.heroEmoji}
+            heroImageUrl={p.heroImageUrl}
             ratingAvg={p.ratingAvg}
             etaMinsLow={p.etaMinsLow}
             etaMinsHigh={p.etaMinsHigh}

@@ -10,6 +10,7 @@ interface Props {
   nameAr?: string | null;
   cuisineTag?: string | null;
   heroEmoji: string;
+  heroImageUrl?: string | null;
   ratingAvg: number;
   etaMinsLow: number;
   etaMinsHigh: number;
@@ -25,8 +26,13 @@ export default function RestaurantCard(p: Props) {
       href={`/restaurant/${p.id}`}
       className="flex items-center gap-3 rounded-2xl border border-transparent bg-paper p-3 transition hover:border-gold"
     >
-      <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-claysoft text-2xl">
-        {p.heroEmoji}
+      <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl bg-claysoft">
+        {p.heroImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={p.heroImageUrl} alt={displayName} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-2xl">{p.heroEmoji}</div>
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -52,3 +58,4 @@ export default function RestaurantCard(p: Props) {
     </Link>
   );
 }
+

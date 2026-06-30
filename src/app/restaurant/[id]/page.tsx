@@ -14,6 +14,7 @@ export default async function RestaurantPage({ params }: { params: { id: string 
     <div>
       <RestaurantHeader
         heroEmoji={partner.heroEmoji}
+        heroImageUrl={partner.heroImageUrl}
         name={partner.name}
         nameAr={partner.nameAr}
         cuisineTag={partner.cuisineTag}
