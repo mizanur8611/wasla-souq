@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import {
   Power,
   Package,
@@ -18,12 +19,16 @@ import {
   Car,
 } from "lucide-react";
 
+const LiveMap = dynamic(() => import("@/components/LiveMap"), { ssr: false });
+
 interface RiderOrder {
   id: string;
   status: string;
   total: number;
   deliveryFee: number;
   deliveryAddress: string;
+  deliveryLat: number | null;
+  deliveryLng: number | null;
   partnerName: string;
   partnerHeroEmoji: string;
   createdAt: string;
@@ -68,6 +73,7 @@ export default function RiderDashboard() {
   const [myOrders, setMyOrders] = useState<RiderOrder[] | null>(null);
   const [earnings, setEarnings] = useState<Earnings | null>(null);
   const [actingOn, setActingOn] = useState<string | null>(null);
+  const [myPosition, setMyPosition] = useState<[number, number] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadProfile = useCallback(async () => {
@@ -117,6 +123,7 @@ export default function RiderDashboard() {
     let lastSent = 0;
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
+        setMyPosition([pos.coords.latitude, pos.coords.longitude]);
         const now = Date.now();
         if (now - lastSent < 8000) return;
         lastSent = now;
@@ -248,7 +255,7 @@ export default function RiderDashboard() {
                 <h2 className="mb-3 font-display text-base font-bold text-ink">Active delivery</h2>
                 <div className="space-y-3">
                   {active.map((o) => (
-                    <ActiveDeliveryCard key={o.id} order={o} actingOn={actingOn} onAdvance={advance} />
+                    <ActiveDeliveryCard key={o.id} order={o} actingOn={actingOn} onAdvance={advance} myPosition={myPosition} />
                   ))}
                 </div>
               </section>
@@ -307,12 +314,21 @@ function ActiveDeliveryCard({
   order,
   actingOn,
   onAdvance,
+  myPosition,
 }: {
   order: RiderOrder;
   actingOn: string | null;
   onAdvance: (orderId: string, newStatus: string) => void;
+  myPosition: [number, number] | null;
 }) {
-  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.deliveryAddress)}`;
+  const hasPin = typeof order.deliveryLat === "number" && typeof order.deliveryLng === "number";
+  // Precise pin beats the free-text address for navigation — the customer may have typed
+  // "Home · Marina Walk, Dubai Marina" while actually standing somewhere more specific.
+  // Falls back to a text search when no pin was dropped at checkout.
+  const mapsUrl = hasPin
+    ? `https://www.google.com/maps/dir/?api=1&destination=${order.deliveryLat},${order.deliveryLng}`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.deliveryAddress)}`;
+
   return (
     <div className="rounded-2xl bg-paper p-4">
       <div className="mb-1 flex items-center gap-2">
@@ -324,7 +340,23 @@ function ActiveDeliveryCard({
       </div>
       <div className="mt-2 flex items-center gap-1 text-xs text-muted">
         <MapPin size={11} /> {order.deliveryAddress}
+        {!hasPin && <span className="text-[10px] text-gold">(no exact pin — customer typed this address)</span>}
       </div>
+
+      {hasPin && (
+        <div className="mt-3">
+          <LiveMap
+            center={myPosition ?? [order.deliveryLat as number, order.deliveryLng as number]}
+            zoom={13}
+            height={180}
+            showLine={!!myPosition}
+            pins={[
+              { lat: order.deliveryLat as number, lng: order.deliveryLng as number, emoji: "🏠", color: "#C68A3D", label: "Delivery address" },
+              ...(myPosition ? [{ lat: myPosition[0], lng: myPosition[1], emoji: "🛵", color: "#11645B", label: "You" }] : []),
+            ]}
+          />
+        </div>
+      )}
 
       <a
         href={mapsUrl}

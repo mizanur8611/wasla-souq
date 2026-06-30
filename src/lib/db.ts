@@ -865,6 +865,8 @@ export async function listOrdersForRider(riderId: string) {
     total: order.total,
     deliveryFee: order.delivery_fee,
     deliveryAddress: order.delivery_address,
+    deliveryLat: order.delivery_lat,
+    deliveryLng: order.delivery_lng,
     partnerName: order.partner_name,
     partnerHeroEmoji: order.partner_hero_emoji,
     createdAt: order.created_at,
@@ -1135,5 +1137,4 @@ export async function getPlatformAnalytics() {
     },
   };
 }
-
 
