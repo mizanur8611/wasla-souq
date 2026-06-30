@@ -1,14 +1,28 @@
 import { NextResponse } from "next/server";
-import { createUser, getUserByEmail } from "@/lib/db";
+import { createUser, getUserByEmail, listAllUsers, ensureRiderProfile } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-// Phase 1 has no public restaurant sign-up flow yet — accounts are created by an admin
-// (or, for local setup, by the seed script) and handed to the restaurant owner. A
-// self-serve "request access" flow is a natural Phase 2 addition once there's an Admin
-// Panel UI to approve those requests against, per the Full Platform Specification.
+export async function GET() {
+  const session = getSession();
+  if (!session || session.role !== "admin") {
+    return NextResponse.json({ error: "Not authorized" }, { status: 401 });
+  }
+  const users = await listAllUsers();
+  return NextResponse.json(users);
+}
+
+// Phase 1 has no public restaurant/rider sign-up flow yet — accounts are created here by
+// a logged-in admin from the User Management tab and handed to the owner/rider.
+// A self-serve "request access" flow is a natural Phase 2 addition once there's demand.
 export async function POST(req: Request) {
+  const session = getSession();
+  if (!session || session.role !== "admin") {
+    return NextResponse.json({ error: "Not authorized" }, { status: 401 });
+  }
+
   const { email, password, name, partnerId, role } = await req.json();
 
   if (!email || !password || !name || !role) {
@@ -25,6 +39,10 @@ export async function POST(req: Request) {
 
   const passwordHash = await hashPassword(password);
   const user = await createUser({ email, passwordHash, role, name, partnerId: partnerId ?? null });
+  if (role === "rider" && user) {
+    await ensureRiderProfile(user.id);
+  }
 
   return NextResponse.json({ id: user!.id, email: user!.email, role: user!.role, name: user!.name }, { status: 201 });
 }
+

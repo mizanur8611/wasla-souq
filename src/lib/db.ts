@@ -177,6 +177,14 @@ function ensureSchema(): Promise<void> {
         rating_avg REAL NOT NULL DEFAULT 5.0,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
+
+      -- Phase 1 Admin Panel addition: lets an admin resolve a dispute with a note and an
+      -- optional refund amount, instead of just open/closed. No real PSP refund is issued
+      -- yet (see README "Known items before production") — this records the admin's
+      -- decision so support/finance have a paper trail to act on manually.
+      ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolution TEXT;
+      ALTER TABLE disputes ADD COLUMN IF NOT EXISTS refund_amount REAL;
+      ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
     `).then(() => undefined);
   }
   return schemaReady;
@@ -884,6 +892,181 @@ export async function getRiderEarnings(riderId: string) {
     totalDeliveries: totalsRes.rows[0].delivery_count,
     today: { earnings: todayRes.rows[0].earnings, deliveries: todayRes.rows[0].delivery_count },
     week: { earnings: weekRes.rows[0].earnings, deliveries: weekRes.rows[0].delivery_count },
+  };
+}
+
+
+// ---------- Admin Panel (Phase 1) ----------
+
+// Every partner regardless of status, for the admin approval queue — listApprovedPartners
+// (used by the customer-facing site) deliberately only returns status='approved'.
+export async function listAllPartnersForAdmin() {
+  await ensureSchema();
+  const res = await pool.query(
+    `SELECT p.*, c.name AS city_name FROM partners p
+     LEFT JOIN cities c ON c.id = p.city_id
+     ORDER BY p.created_at DESC`
+  );
+  return res.rows.map((row: any) => ({ ...toPartnerShape(row), cityName: row.city_name }));
+}
+
+const ALLOWED_PARTNER_STATUSES = ["pending", "approved", "suspended"];
+
+export async function setPartnerStatus(partnerId: string, status: string) {
+  if (!ALLOWED_PARTNER_STATUSES.includes(status)) {
+    throw new Error(`Invalid partner status: ${status}`);
+  }
+  await ensureSchema();
+  const res = await pool.query("UPDATE partners SET status = $1 WHERE id = $2 RETURNING *", [status, partnerId]);
+  if (!res.rows.length) return null;
+  return getPartnerById(partnerId);
+}
+
+// All non-customer accounts (admin/restaurant_owner/rider), for the admin User
+// Management tab. Password hashes are intentionally never selected here.
+export async function listAllUsers() {
+  await ensureSchema();
+  const res = await pool.query(
+    `SELECT u.id, u.email, u.role, u.name, u.partner_id, u.created_at,
+            p.name AS partner_name, rp.is_online AS rider_is_online
+     FROM users u
+     LEFT JOIN partners p ON p.id = u.partner_id
+     LEFT JOIN rider_profiles rp ON rp.user_id = u.id
+     ORDER BY u.created_at DESC`
+  );
+  return res.rows.map((row: any) => ({
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    name: row.name,
+    partnerId: row.partner_id,
+    partnerName: row.partner_name,
+    riderIsOnline: row.rider_is_online,
+    createdAt: row.created_at,
+  }));
+}
+
+// Riders currently online, with whatever delivery (if any) they're carrying right now —
+// the closest thing to a "live rider map" Phase 1 can offer without real GPS coordinates
+// (see roadmap doc, "GPS/Location feature"). Shows the delivery address as a text stand-in
+// for a map pin.
+export async function listOnlineRidersForAdmin() {
+  await ensureSchema();
+  const res = await pool.query(
+    `SELECT u.id, u.name, u.email, rp.vehicle_type, rp.rating_avg,
+            o.id AS order_id, o.status AS order_status, o.delivery_address, p.name AS partner_name
+     FROM users u
+     JOIN rider_profiles rp ON rp.user_id = u.id
+     LEFT JOIN fulfilment_tasks f ON f.rider_id = u.id AND f.status IN ('assigned','picked_up','en_route')
+     LEFT JOIN orders o ON o.id = f.order_id
+     LEFT JOIN partners p ON p.id = o.partner_id
+     WHERE rp.is_online = true
+     ORDER BY u.name`
+  );
+  return res.rows.map((row: any) => ({
+    riderId: row.id,
+    name: row.name,
+    email: row.email,
+    vehicleType: row.vehicle_type,
+    ratingAvg: row.rating_avg,
+    activeOrderId: row.order_id,
+    activeOrderStatus: row.order_status,
+    activeDeliveryAddress: row.delivery_address,
+    activePartnerName: row.partner_name,
+  }));
+}
+
+// Every dispute across every restaurant, most recent first — the admin counterpart to
+// listDisputesForPartner, which is scoped to one restaurant owner's own filings.
+export async function listAllDisputesForAdmin() {
+  await ensureSchema();
+  const res = await pool.query(
+    `SELECT d.*, p.name AS partner_name FROM disputes d
+     JOIN partners p ON p.id = d.partner_id
+     ORDER BY d.created_at DESC LIMIT 200`
+  );
+  return res.rows.map((r: any) => ({
+    id: r.id,
+    partnerId: r.partner_id,
+    partnerName: r.partner_name,
+    orderId: r.order_id,
+    message: r.message,
+    status: r.status,
+    resolution: r.resolution,
+    refundAmount: r.refund_amount,
+    resolvedAt: r.resolved_at,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function resolveDispute(disputeId: string, resolution: string, refundAmount?: number | null) {
+  await ensureSchema();
+  await pool.query(
+    `UPDATE disputes SET status = 'resolved', resolution = $1, refund_amount = $2, resolved_at = now() WHERE id = $3`,
+    [resolution, refundAmount ?? null, disputeId]
+  );
+  const res = await pool.query(
+    `SELECT d.*, p.name AS partner_name FROM disputes d JOIN partners p ON p.id = d.partner_id WHERE d.id = $1`,
+    [disputeId]
+  );
+  if (!res.rows.length) return null;
+  const r = res.rows[0];
+  return {
+    id: r.id,
+    partnerId: r.partner_id,
+    partnerName: r.partner_name,
+    orderId: r.order_id,
+    message: r.message,
+    status: r.status,
+    resolution: r.resolution,
+    refundAmount: r.refund_amount,
+    resolvedAt: r.resolved_at,
+    createdAt: r.created_at,
+  };
+}
+
+// Platform-wide numbers for the admin Analytics tab — same "compute straight from
+// orders, no separate analytics table" approach as getPartnerSalesStats, just without the
+// partner_id filter.
+export async function getPlatformAnalytics() {
+  await ensureSchema();
+  const totalsRes = await pool.query(
+    `SELECT COUNT(*)::int AS order_count, COALESCE(SUM(total),0)::float AS revenue,
+            COALESCE(SUM(delivery_fee),0)::float AS rider_payouts,
+            COALESCE(SUM(subtotal * (SELECT AVG(commission_rate) FROM partners)),0)::float AS est_commission
+     FROM orders WHERE status = 'delivered'`
+  );
+  const weekRes = await pool.query(
+    `SELECT COUNT(*)::int AS order_count, COALESCE(SUM(total),0)::float AS revenue
+     FROM orders WHERE status = 'delivered' AND created_at >= now() - interval '7 days'`
+  );
+  const topPartnersRes = await pool.query(
+    `SELECT p.name, COUNT(*)::int AS order_count, COALESCE(SUM(o.total),0)::float AS revenue
+     FROM orders o JOIN partners p ON p.id = o.partner_id
+     WHERE o.status = 'delivered'
+     GROUP BY p.name ORDER BY revenue DESC LIMIT 5`
+  );
+  const riderCountRes = await pool.query(
+    `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE is_online)::int AS online FROM rider_profiles`
+  );
+  const partnerCountRes = await pool.query(
+    `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status = 'approved')::int AS approved,
+            COUNT(*) FILTER (WHERE status = 'pending')::int AS pending
+     FROM partners`
+  );
+  return {
+    totalOrders: totalsRes.rows[0].order_count,
+    totalRevenue: totalsRes.rows[0].revenue,
+    riderPayouts: totalsRes.rows[0].rider_payouts,
+    weekOrders: weekRes.rows[0].order_count,
+    weekRevenue: weekRes.rows[0].revenue,
+    topPartners: topPartnersRes.rows,
+    riders: { total: riderCountRes.rows[0].total, online: riderCountRes.rows[0].online },
+    partners: {
+      total: partnerCountRes.rows[0].total,
+      approved: partnerCountRes.rows[0].approved,
+      pending: partnerCountRes.rows[0].pending,
+    },
   };
 }
 

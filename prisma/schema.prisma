@@ -76,8 +76,11 @@ model Partner {
   etaMinsLow     Int           @default(20) @map("eta_mins_low")
   etaMinsHigh    Int           @default(35) @map("eta_mins_high")
   heroEmoji      String        @default("🍽️") @map("hero_emoji")
+  imageUrl       String?       @map("image_url")
+  isOpen         Boolean       @default(true) @map("is_open")
   catalogItems   CatalogItem[]
   orders         Order[]
+  disputes       Dispute[]
   createdAt      DateTime      @default(now()) @map("created_at")
 
   @@map("partners")
@@ -127,11 +130,33 @@ model Order {
   total           Float
   paymentMethod   String          @default("card") @map("payment_method")
   deliveryAddress String          @map("delivery_address")
+  customerRating  Int?            @map("customer_rating")
+  customerReview  String?         @map("customer_review")
   items           OrderItem[]
   fulfilment      FulfilmentTask?
+  disputes        Dispute[]
   createdAt       DateTime        @default(now()) @map("created_at")
 
   @@map("orders")
+}
+
+// Phase 1 Restaurant Panel addition: a restaurant files a dispute against an order (or
+// generally); Phase 1 Admin Panel addition: an admin resolves it with a note and an
+// optional manual refund amount (see Admin Panel "Dispute queue & refunds").
+model Dispute {
+  id           String    @id @default(uuid())
+  partner      Partner   @relation(fields: [partnerId], references: [id])
+  partnerId    String    @map("partner_id")
+  order        Order?    @relation(fields: [orderId], references: [id])
+  orderId      String?   @map("order_id")
+  message      String
+  status       String    @default("open") // open | resolved
+  resolution   String?
+  refundAmount Float?    @map("refund_amount")
+  resolvedAt   DateTime? @map("resolved_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@map("disputes")
 }
 
 model OrderItem {
