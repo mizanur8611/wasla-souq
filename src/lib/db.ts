@@ -219,6 +219,19 @@ function ensureSchema(): Promise<void> {
       ALTER TABLE rider_profiles ADD COLUMN IF NOT EXISTS last_lat REAL;
       ALTER TABLE rider_profiles ADD COLUMN IF NOT EXISTS last_lng REAL;
       ALTER TABLE rider_profiles ADD COLUMN IF NOT EXISTS last_location_at TIMESTAMPTZ;
+
+      -- Phase 1 GPS addition (rider distance/time estimates): a restaurant's own pickup
+      -- pin, separate from the customer's delivery pin above. Without this a rider could
+      -- see "how far to the customer" but not "how far to the restaurant" — both legs of
+      -- the trip matter for the accept/decline decision. Backfilled below for the four
+      -- seeded demo restaurants since there's no restaurant-side address-pinning UI yet
+      -- (only the Admin Panel onboarding form creates restaurants in Phase 1).
+      ALTER TABLE partners ADD COLUMN IF NOT EXISTS lat REAL;
+      ALTER TABLE partners ADD COLUMN IF NOT EXISTS lng REAL;
+      UPDATE partners SET lat = 25.0805, lng = 55.1403 WHERE name = 'Manqal Grill House' AND lat IS NULL;
+      UPDATE partners SET lat = 25.0763, lng = 55.1339 WHERE name = 'Saffron & Sumac' AND lat IS NULL;
+      UPDATE partners SET lat = 25.0890, lng = 55.1478 WHERE name = 'Karak Corner' AND lat IS NULL;
+      UPDATE partners SET lat = 25.0717, lng = 55.1281 WHERE name = 'Bait Al Shawarma' AND lat IS NULL;
     `).then(() => undefined);
   }
   return schemaReady;
@@ -369,6 +382,8 @@ function toPartnerShape(row: any) {
     heroEmoji: row.hero_emoji,
     heroImageUrl: row.image_url,
     isOpen: row.is_open,
+    lat: row.lat,
+    lng: row.lng,
     createdAt: row.created_at,
   };
 }
@@ -829,7 +844,7 @@ export async function updateRiderLocation(userId: string, lat: number, lng: numb
 export async function listAvailableOrdersForRiders() {
   await ensureSchema();
   const res = await pool.query(
-    `SELECT o.*, p.name AS partner_name, p.hero_emoji AS partner_hero_emoji
+    `SELECT o.*, p.name AS partner_name, p.hero_emoji AS partner_hero_emoji, p.lat AS partner_lat, p.lng AS partner_lng
      FROM orders o
      JOIN partners p ON p.id = o.partner_id
      JOIN fulfilment_tasks f ON f.order_id = o.id
@@ -841,8 +856,12 @@ export async function listAvailableOrdersForRiders() {
     total: order.total,
     deliveryFee: order.delivery_fee,
     deliveryAddress: order.delivery_address,
+    deliveryLat: order.delivery_lat,
+    deliveryLng: order.delivery_lng,
     partnerName: order.partner_name,
     partnerHeroEmoji: order.partner_hero_emoji,
+    partnerLat: order.partner_lat,
+    partnerLng: order.partner_lng,
     createdAt: order.created_at,
   }));
 }
@@ -851,7 +870,7 @@ export async function listAvailableOrdersForRiders() {
 export async function listOrdersForRider(riderId: string) {
   await ensureSchema();
   const res = await pool.query(
-    `SELECT o.*, p.name AS partner_name, p.hero_emoji AS partner_hero_emoji
+    `SELECT o.*, p.name AS partner_name, p.hero_emoji AS partner_hero_emoji, p.lat AS partner_lat, p.lng AS partner_lng
      FROM orders o
      JOIN partners p ON p.id = o.partner_id
      JOIN fulfilment_tasks f ON f.order_id = o.id
@@ -869,6 +888,8 @@ export async function listOrdersForRider(riderId: string) {
     deliveryLng: order.delivery_lng,
     partnerName: order.partner_name,
     partnerHeroEmoji: order.partner_hero_emoji,
+    partnerLat: order.partner_lat,
+    partnerLng: order.partner_lng,
     createdAt: order.created_at,
   }));
 }

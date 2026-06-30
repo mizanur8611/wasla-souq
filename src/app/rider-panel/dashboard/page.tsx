@@ -21,6 +21,8 @@ import {
 
 const LiveMap = dynamic(() => import("@/components/LiveMap"), { ssr: false });
 
+import { distanceKm, formatDistanceEta } from "@/lib/geo";
+
 interface RiderOrder {
   id: string;
   status: string;
@@ -31,6 +33,8 @@ interface RiderOrder {
   deliveryLng: number | null;
   partnerName: string;
   partnerHeroEmoji: string;
+  partnerLat: number | null;
+  partnerLng: number | null;
   createdAt: string;
 }
 
@@ -268,32 +272,62 @@ export default function RiderDashboard() {
                 </h2>
                 {available.length === 0 && <p className="text-sm text-muted">No delivery requests right now — stay online.</p>}
                 <div className="space-y-3">
-                  {available.map((o) => (
-                    <div key={o.id} className="rounded-2xl bg-paper p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">{o.partnerHeroEmoji}</span>
-                          <div>
-                            <div className="text-sm font-bold text-ink">{o.partnerName}</div>
-                            <div className="flex items-center gap-1 text-xs text-muted">
-                              <MapPin size={11} /> {o.deliveryAddress}
+                  {available.map((o) => {
+                    const hasPickup = typeof o.partnerLat === "number" && typeof o.partnerLng === "number";
+                    const hasDrop = typeof o.deliveryLat === "number" && typeof o.deliveryLng === "number";
+                    const pickupLeg =
+                      myPosition && hasPickup
+                        ? distanceKm(myPosition[0], myPosition[1], o.partnerLat as number, o.partnerLng as number)
+                        : null;
+                    const dropLeg =
+                      hasPickup && hasDrop
+                        ? distanceKm(o.partnerLat as number, o.partnerLng as number, o.deliveryLat as number, o.deliveryLng as number)
+                        : null;
+                    return (
+                      <div key={o.id} className="rounded-2xl bg-paper p-4">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl">{o.partnerHeroEmoji}</span>
+                            <div>
+                              <div className="text-sm font-bold text-ink">{o.partnerName}</div>
+                              <div className="flex items-center gap-1 text-xs text-muted">
+                                <MapPin size={11} /> {o.deliveryAddress}
+                              </div>
                             </div>
                           </div>
+                          <div className="text-right">
+                            <div className="text-sm font-bold text-gold">+AED {o.deliveryFee.toFixed(2)}</div>
+                            <div className="text-[11px] text-muted">order AED {o.total.toFixed(2)}</div>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-sm font-bold text-gold">+AED {o.deliveryFee.toFixed(2)}</div>
-                          <div className="text-[11px] text-muted">order AED {o.total.toFixed(2)}</div>
-                        </div>
+
+                        {(pickupLeg !== null || dropLeg !== null) && (
+                          <div className="mt-3 space-y-1.5 rounded-xl bg-sand p-2.5 text-xs">
+                            {pickupLeg !== null && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-muted">📍 You → restaurant</span>
+                                <span className="font-bold text-ink">{formatDistanceEta(pickupLeg)}</span>
+                              </div>
+                            )}
+                            {dropLeg !== null && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-muted">🏠 Restaurant → drop-off</span>
+                                <span className="font-bold text-ink">{formatDistanceEta(dropLeg)}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() => acceptOrder(o.id)}
+                          disabled={actingOn === o.id}
+                          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-ink py-2.5 text-sm font-bold text-sand disabled:opacity-60"
+                        >
+                          <CheckCircle2 size={15} /> Accept delivery
+                        </button>
                       </div>
-                      <button
-                        onClick={() => acceptOrder(o.id)}
-                        disabled={actingOn === o.id}
-                        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-ink py-2.5 text-sm font-bold text-sand disabled:opacity-60"
-                      >
-                        <CheckCircle2 size={15} /> Accept delivery
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             )}
@@ -321,13 +355,26 @@ function ActiveDeliveryCard({
   onAdvance: (orderId: string, newStatus: string) => void;
   myPosition: [number, number] | null;
 }) {
-  const hasPin = typeof order.deliveryLat === "number" && typeof order.deliveryLng === "number";
-  // Precise pin beats the free-text address for navigation — the customer may have typed
-  // "Home · Marina Walk, Dubai Marina" while actually standing somewhere more specific.
-  // Falls back to a text search when no pin was dropped at checkout.
-  const mapsUrl = hasPin
-    ? `https://www.google.com/maps/dir/?api=1&destination=${order.deliveryLat},${order.deliveryLng}`
-    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(order.deliveryAddress)}`;
+  const headingToRestaurant = order.status === "rider_assigned";
+  const hasPickup = typeof order.partnerLat === "number" && typeof order.partnerLng === "number";
+  const hasDrop = typeof order.deliveryLat === "number" && typeof order.deliveryLng === "number";
+
+  // While heading to the restaurant, the relevant destination is the pickup pin; once
+  // picked up, it switches to the customer's drop-off pin. Falls back to a text search
+  // when no pin exists for that leg (e.g. restaurant has no lat/lng on file yet).
+  const destLat = headingToRestaurant ? order.partnerLat : order.deliveryLat;
+  const destLng = headingToRestaurant ? order.partnerLng : order.deliveryLng;
+  const hasDest = headingToRestaurant ? hasPickup : hasDrop;
+  const destLabel = headingToRestaurant ? order.partnerName : "Delivery address";
+  const destEmoji = headingToRestaurant ? "🍽️" : "🏠";
+
+  const mapsUrl = hasDest
+    ? `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+        headingToRestaurant ? order.partnerName : order.deliveryAddress
+      )}`;
+
+  const legKm = myPosition && hasDest ? distanceKm(myPosition[0], myPosition[1], destLat as number, destLng as number) : null;
 
   return (
     <div className="rounded-2xl bg-paper p-4">
@@ -339,19 +386,25 @@ function ActiveDeliveryCard({
         </div>
       </div>
       <div className="mt-2 flex items-center gap-1 text-xs text-muted">
-        <MapPin size={11} /> {order.deliveryAddress}
-        {!hasPin && <span className="text-[10px] text-gold">(no exact pin — customer typed this address)</span>}
+        <MapPin size={11} /> {headingToRestaurant ? `Pickup: ${order.partnerName}` : order.deliveryAddress}
+        {!hasDest && <span className="text-[10px] text-gold">(no exact pin on file)</span>}
       </div>
 
-      {hasPin && (
+      {legKm !== null && (
+        <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-tealsoft px-2.5 py-1 text-xs font-bold text-teal">
+          {formatDistanceEta(legKm)} away
+        </div>
+      )}
+
+      {hasDest && (
         <div className="mt-3">
           <LiveMap
-            center={myPosition ?? [order.deliveryLat as number, order.deliveryLng as number]}
+            center={myPosition ?? [destLat as number, destLng as number]}
             zoom={13}
             height={180}
             showLine={!!myPosition}
             pins={[
-              { lat: order.deliveryLat as number, lng: order.deliveryLng as number, emoji: "🏠", color: "#C68A3D", label: "Delivery address" },
+              { lat: destLat as number, lng: destLng as number, emoji: destEmoji, color: headingToRestaurant ? "#0B2230" : "#C68A3D", label: destLabel },
               ...(myPosition ? [{ lat: myPosition[0], lng: myPosition[1], emoji: "🛵", color: "#11645B", label: "You" }] : []),
             ]}
           />
