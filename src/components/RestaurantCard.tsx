@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
 import { Star, Clock } from "lucide-react";
+import { useLocale } from "./LocaleContext";
 
 interface Props {
   id: string;
@@ -14,6 +17,9 @@ interface Props {
 }
 
 export default function RestaurantCard(p: Props) {
+  const { locale, t } = useLocale();
+  const displayName = locale === "ar" && p.nameAr ? p.nameAr : p.name;
+
   return (
     <Link
       href={`/restaurant/${p.id}`}
@@ -24,9 +30,11 @@ export default function RestaurantCard(p: Props) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="font-display text-sm font-bold text-ink">{p.name}</span>
+          <span className="font-display text-sm font-bold text-ink">{displayName}</span>
           {p.halalVerified && (
-            <span className="rounded-full bg-tealsoft px-2 py-0.5 text-[10px] font-bold text-teal">Halal</span>
+            <span className="rounded-full bg-tealsoft px-2 py-0.5 text-[10px] font-bold text-teal">
+              {t("card.halal")}
+            </span>
           )}
         </div>
         <div className="mt-0.5 text-xs text-muted">{p.cuisineTag}</div>
@@ -37,10 +45,11 @@ export default function RestaurantCard(p: Props) {
           </span>
           <span className="flex items-center gap-1">
             <Clock size={12} />
-            {p.etaMinsLow}–{p.etaMinsHigh} min
+            {p.etaMinsLow}–{p.etaMinsHigh} {t("card.min")}
           </span>
         </div>
       </div>
     </Link>
   );
 }
+
