@@ -34,6 +34,7 @@ interface Order {
   partnerName: string;
   deliveryAddress: string;
   paymentMethod: string;
+  hasProofPhoto?: boolean;
   createdAt: string;
   items: OrderItem[];
 }
@@ -320,6 +321,11 @@ function OrderRow({ order }: { order: Order }) {
         </div>
         <div className="mt-1 text-sm">{order.items.map((it) => `${it.name} ×${it.quantity}`).join(", ")}</div>
         <div className="mt-1 text-xs text-muted">{order.deliveryAddress}</div>
+        {order.status === "delivered" && order.hasProofPhoto && (
+          <div className="mt-1.5">
+            <DeliveryProofViewer orderId={order.id} />
+          </div>
+        )}
       </div>
       <div className="text-right">
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_COLOR[order.status] || "bg-sanddeep text-ink"}`}>

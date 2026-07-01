@@ -14,6 +14,7 @@ interface Order {
   total: number;
   deliveryAddress: string;
   paymentMethod: string;
+  hasProofPhoto?: boolean;
   createdAt: string;
   items: OrderItem[];
 }
@@ -267,6 +268,7 @@ function OrderHeader({ order }: { order: Order }) {
         <div className="font-mono text-xs text-muted">#{order.id.slice(-8).toUpperCase()}</div>
         <div className="mt-1 text-sm">{order.items.map((it) => `${it.name} ×${it.quantity}`).join(", ")}</div>
         <div className="mt-1 text-xs text-muted">{order.deliveryAddress}</div>
+        {order.status === "delivered" && order.hasProofPhoto && <RestaurantProofViewer orderId={order.id} />}
       </div>
       <div className="text-right">
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${STATUS_COLOR[order.status] || "bg-sanddeep text-ink"}`}>
@@ -274,6 +276,45 @@ function OrderHeader({ order }: { order: Order }) {
         </span>
         <div className="mt-1.5 font-mono text-sm font-semibold text-ink">AED {order.total.toFixed(2)}</div>
       </div>
+    </div>
+  );
+}
+
+// Lazy-loads the rider's proof-of-delivery photo for this restaurant's own order — only
+// fetched when the owner actually clicks, not bundled into the order list response.
+function RestaurantProofViewer({ orderId }: { orderId: string }) {
+  const [open, setOpen] = useState(false);
+  const [photoData, setPhotoData] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function toggle() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (!photoData) {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/restaurant/orders/${orderId}/proof`);
+        if (res.ok) setPhotoData((await res.json()).photoData);
+      } finally {
+        setLoading(false);
+      }
+    }
+  }
+
+  return (
+    <div className="mt-1.5">
+      <button onClick={toggle} className="flex items-center gap-1 rounded-full bg-tealsoft px-2 py-0.5 text-[11px] font-bold text-teal">
+        📷 {open ? "Hide proof" : "View delivery proof"}
+      </button>
+      {open && (
+        <div className="mt-1.5 max-w-[200px]">
+          {loading && <p className="text-xs text-muted">Loading…</p>}
+          {!loading && photoData && <img src={photoData} alt="Delivery proof" className="max-h-40 w-full rounded-lg object-cover" />}
+        </div>
+      )}
     </div>
   );
 }

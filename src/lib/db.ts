@@ -594,7 +594,10 @@ function toUserShape(row: any) {
 export async function listOrdersForPartner(partnerId: string) {
   await ensureSchema();
   const ordersRes = await pool.query(
-    "SELECT * FROM orders WHERE partner_id = $1 ORDER BY created_at DESC LIMIT 100",
+    `SELECT o.*, (f.proof_photo_data IS NOT NULL) AS has_proof_photo
+     FROM orders o
+     LEFT JOIN fulfilment_tasks f ON f.order_id = o.id
+     WHERE o.partner_id = $1 ORDER BY o.created_at DESC LIMIT 100`,
     [partnerId]
   );
   const orders = [];
@@ -606,6 +609,7 @@ export async function listOrdersForPartner(partnerId: string) {
       total: order.total,
       deliveryAddress: order.delivery_address,
       paymentMethod: order.payment_method,
+      hasProofPhoto: order.has_proof_photo,
       createdAt: order.created_at,
       items: itemsRes.rows.map((r: any) => ({ name: r.name_snapshot, quantity: r.quantity })),
     });
@@ -618,8 +622,10 @@ export async function listOrdersForPartner(partnerId: string) {
 export async function listAllOrders() {
   await ensureSchema();
   const ordersRes = await pool.query(
-    `SELECT o.*, p.name AS partner_name FROM orders o
+    `SELECT o.*, p.name AS partner_name, (f.proof_photo_data IS NOT NULL) AS has_proof_photo
+     FROM orders o
      JOIN partners p ON p.id = o.partner_id
+     LEFT JOIN fulfilment_tasks f ON f.order_id = o.id
      ORDER BY o.created_at DESC LIMIT 200`
   );
   const orders = [];
@@ -632,6 +638,7 @@ export async function listAllOrders() {
       partnerName: order.partner_name,
       deliveryAddress: order.delivery_address,
       paymentMethod: order.payment_method,
+      hasProofPhoto: order.has_proof_photo,
       createdAt: order.created_at,
       items: itemsRes.rows.map((r: any) => ({ name: r.name_snapshot, quantity: r.quantity })),
     });
@@ -1289,5 +1296,4 @@ export async function getPlatformAnalytics() {
     },
   };
 }
-
 
