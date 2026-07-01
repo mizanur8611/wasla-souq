@@ -4,13 +4,16 @@ import { ShieldCheck } from "lucide-react";
 import { useLocale } from "./LocaleContext";
 
 export default function HomeIntro({ hasPartners }: { hasPartners: boolean }) {
-  const { t } = useLocale();
+  const { t, locale, market } = useLocale();
+  const cityName = locale === "ar" ? market.cityAr : market.city;
 
   return (
     <>
       <div className="mb-5">
         <h1 className="font-display text-2xl font-bold text-ink">{t("home.title")}</h1>
-        <p className="mt-1 text-sm text-muted">{t("home.subtitle")}</p>
+        <p className="mt-1 text-sm text-muted">
+          {market.flag} {cityName} · {locale === "ar" ? "التوصيل متاح الآن" : "delivering now"}
+        </p>
       </div>
 
       <div className="mb-6 flex items-center gap-3 rounded-2xl bg-teal p-4 text-paper">

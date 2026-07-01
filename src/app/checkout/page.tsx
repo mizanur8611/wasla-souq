@@ -16,7 +16,7 @@ const DEFAULT_PIN: [number, number] = [25.0805, 55.1403];
 
 export default function CheckoutPage() {
   const { partnerId, lines, subtotal, clearCart } = useCart();
-  const { t } = useLocale();
+  const { t, currency, fmt } = useLocale();
   const router = useRouter();
   const [address, setAddress] = useState("Home · Marina Walk, Dubai Marina");
   const [pin, setPin] = useState<[number, number] | null>(null);
@@ -25,7 +25,7 @@ export default function CheckoutPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const breakdown = computePriceBreakdown(subtotal, "AED");
+  const breakdown = computePriceBreakdown(subtotal, currency);
 
   function useMyLocation() {
     if (!navigator.geolocation) {
@@ -142,12 +142,12 @@ export default function CheckoutPage() {
       </div>
 
       <div className="rounded-2xl bg-paper p-4 text-sm">
-        <Row label={t("cart.subtotal")} value={breakdown.subtotal} />
-        <Row label={t("cart.deliveryFee")} value={breakdown.deliveryFee} />
-        <Row label={t("cart.serviceFee")} value={breakdown.serviceFee} />
+        <Row label={t("cart.subtotal")} value={breakdown.subtotal} fmt={fmt} />
+        <Row label={t("cart.deliveryFee")} value={breakdown.deliveryFee} fmt={fmt} />
+        <Row label={t("cart.serviceFee")} value={breakdown.serviceFee} fmt={fmt} />
         <div className="mt-2 flex justify-between border-t-2 border-ink pt-3 font-display text-base font-bold text-ink">
           <span>{t("cart.total")}</span>
-          <span className="font-mono">AED {breakdown.total.toFixed(2)}</span>
+          <span className="font-mono">{fmt(breakdown.total)}</span>
         </div>
       </div>
 
@@ -158,17 +158,17 @@ export default function CheckoutPage() {
         disabled={submitting}
         className="mt-4 w-full rounded-2xl bg-ink py-3.5 text-center font-display text-sm font-bold text-sand disabled:opacity-60"
       >
-        {submitting ? t("checkout.placing") : `${t("checkout.place")} · AED ${breakdown.total.toFixed(2)}`}
+        {submitting ? t("checkout.placing") : `${t("checkout.place")} · ${fmt(breakdown.total)}`}
       </button>
     </div>
   );
 }
 
-function Row({ label, value }: { label: string; value: number }) {
+function Row({ label, value, fmt }: { label: string; value: number; fmt: (n: number) => string }) {
   return (
     <div className="flex justify-between border-b border-line py-2 last:border-0">
       <span className="text-muted">{label}</span>
-      <span className="font-mono">AED {value.toFixed(2)}</span>
+      <span className="font-mono">{fmt(value)}</span>
     </div>
   );
 }

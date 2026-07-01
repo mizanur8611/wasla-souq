@@ -8,8 +8,8 @@ import { Minus, Plus, Trash2, ShieldCheck } from "lucide-react";
 
 export default function CartPage() {
   const { lines, partnerName, subtotal, updateQty, removeItem } = useCart();
-  const { locale, t } = useLocale();
-  const breakdown = computePriceBreakdown(subtotal, "AED");
+  const { locale, t, currency, fmt } = useLocale();
+  const breakdown = computePriceBreakdown(subtotal, currency);
 
   if (lines.length === 0) {
     return (
@@ -34,7 +34,7 @@ export default function CartPage() {
             <div key={line.catalogItemId} className="flex items-center gap-3 rounded-2xl bg-paper p-3">
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold text-ink">{displayName}</div>
-                <div className="mt-0.5 font-mono text-xs text-teal">AED {line.price.toFixed(2)}</div>
+                <div className="mt-0.5 font-mono text-xs text-teal">{fmt(line.price)}</div>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -71,12 +71,12 @@ export default function CartPage() {
       </div>
 
       <div className="mt-4 rounded-2xl bg-paper p-4 text-sm">
-        <Row label={t("cart.subtotal")} value={breakdown.subtotal} />
-        <Row label={t("cart.deliveryFee")} value={breakdown.deliveryFee} />
-        <Row label={t("cart.serviceFee")} value={breakdown.serviceFee} />
+        <Row label={t("cart.subtotal")} value={breakdown.subtotal} fmt={fmt} />
+        <Row label={t("cart.deliveryFee")} value={breakdown.deliveryFee} fmt={fmt} />
+        <Row label={t("cart.serviceFee")} value={breakdown.serviceFee} fmt={fmt} />
         <div className="mt-2 flex justify-between border-t-2 border-ink pt-3 font-display text-base font-bold text-ink">
           <span>{t("cart.total")}</span>
-          <span className="font-mono">AED {breakdown.total.toFixed(2)}</span>
+          <span className="font-mono">{fmt(breakdown.total)}</span>
         </div>
       </div>
 
@@ -90,11 +90,11 @@ export default function CartPage() {
   );
 }
 
-function Row({ label, value }: { label: string; value: number }) {
+function Row({ label, value, fmt }: { label: string; value: number; fmt: (n: number) => string }) {
   return (
     <div className="flex justify-between border-b border-line py-2 last:border-0">
       <span className="text-muted">{label}</span>
-      <span className="font-mono">AED {value.toFixed(2)}</span>
+      <span className="font-mono">{fmt(value)}</span>
     </div>
   );
 }

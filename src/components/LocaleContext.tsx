@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { MARKETS, Market, DEFAULT_MARKET } from "@/lib/pricing";
 
 export type Locale = "en" | "ar";
 
@@ -9,20 +10,20 @@ interface LocaleContextValue {
   dir: "ltr" | "rtl";
   setLocale: (locale: Locale) => void;
   t: (key: string) => string;
+  market: Market;
+  setMarket: (m: Market) => void;
+  currency: string;
+  fmt: (amount: number) => string;
 }
 
-const STORAGE_KEY = "wasla-souq-locale";
+const LOCALE_KEY = "wasla-souq-locale";
+const MARKET_KEY = "wasla-souq-market";
 
 const dictionary: Record<string, { en: string; ar: string }> = {
-  "header.location": { en: "Dubai", ar: "دبي" },
   "header.cart": { en: "Cart", ar: "السلة" },
   "home.title": { en: "Restaurants near you", ar: "مطاعم بالقرب منك" },
-  "home.subtitle": { en: "Dubai Marina · delivering now", ar: "مرسى دبي · التوصيل متاح الآن" },
   "home.trust.title": { en: "Flat delivery fee, always", ar: "رسوم توصيل ثابتة دائماً" },
-  "home.trust.body": {
-    en: "No surge pricing — the full price is shown before you order",
-    ar: "بدون رسوم ذروة — السعر الكامل يظهر قبل الطلب",
-  },
+  "home.trust.body": { en: "No surge pricing — the full price is shown before you order", ar: "بدون رسوم ذروة — السعر الكامل يظهر قبل الطلب" },
   "home.empty": { en: "No restaurants yet — run", ar: "لا توجد مطاعم بعد — شغّل" },
   "home.empty.or": { en: "or add one from", ar: "أو أضف مطعماً من" },
   "card.halal": { en: "Halal", ar: "حلال" },
@@ -32,8 +33,6 @@ const dictionary: Record<string, { en: string; ar: string }> = {
   "category.sides": { en: "Sides", ar: "الأطباق الجانبية" },
   "category.drinks": { en: "Drinks", ar: "المشروبات" },
   "menu.add": { en: "Add", ar: "إضافة" },
-
-  // Cart
   "cart.empty": { en: "Your cart is empty.", ar: "سلتك فارغة." },
   "cart.browse": { en: "Browse restaurants", ar: "تصفح المطاعم" },
   "cart.title": { en: "Your order", ar: "طلبك" },
@@ -43,8 +42,6 @@ const dictionary: Record<string, { en: string; ar: string }> = {
   "cart.serviceFee": { en: "Service fee", ar: "رسوم الخدمة" },
   "cart.total": { en: "Total", ar: "الإجمالي" },
   "cart.checkout": { en: "Go to checkout", ar: "إتمام الطلب" },
-
-  // Checkout
   "checkout.empty": { en: "Your cart is empty — add something from a restaurant first.", ar: "سلتك فارغة — أضف شيئاً من مطعم أولاً." },
   "checkout.title": { en: "Checkout", ar: "إتمام الطلب" },
   "checkout.address": { en: "Delivery address", ar: "عنوان التوصيل" },
@@ -53,12 +50,10 @@ const dictionary: Record<string, { en: string; ar: string }> = {
   "checkout.cash": { en: "Cash on delivery", ar: "الدفع عند الاستلام" },
   "checkout.demoNote": {
     en: "Demo checkout — no real payment is processed. A production build wires this to a PSP supporting mada, Jaywan, NAPS or KNET depending on market.",
-    ar: "دفع تجريبي — لا تتم معالجة أي دفعة حقيقية. في الإصدار النهائي سيتم ربطه ببوابة دفع تدعم مدى أو جيوان أو NAPS أو كي نت حسب السوق.",
+    ar: "دفع تجريبي — لا تتم معالجة أي دفعة حقيقية.",
   },
   "checkout.placing": { en: "Placing order…", ar: "جارٍ إرسال الطلب…" },
   "checkout.place": { en: "Place order", ar: "إرسال الطلب" },
-
-  // Order tracking
   "order.title": { en: "Order", ar: "الطلب" },
   "order.declined": { en: "Order was declined by the restaurant", ar: "تم رفض الطلب من قبل المطعم" },
   "order.cancelled": { en: "Order was cancelled", ar: "تم إلغاء الطلب" },
@@ -66,10 +61,7 @@ const dictionary: Record<string, { en: string; ar: string }> = {
   "order.riderAssigned": { en: "Rider", ar: "السائق" },
   "order.riderNotAssigned": { en: "Rider not yet assigned", ar: "لم يتم تعيين سائق بعد" },
   "order.arriving": { en: "Arriving in ~{mins} minutes", ar: "الوصول خلال ~{mins} دقيقة" },
-  "order.riderPending": {
-    en: "A rider will be assigned once the restaurant marks your order ready",
-    ar: "سيتم تعيين سائق بمجرد أن يضع المطعم طلبك كجاهز",
-  },
+  "order.riderPending": { en: "A rider will be assigned once the restaurant marks your order ready", ar: "سيتم تعيين سائق بمجرد أن يضع المطعم طلبك كجاهز" },
   "order.step.placed": { en: "Order placed", ar: "تم استلام الطلب" },
   "order.step.accepted": { en: "Restaurant accepted", ar: "وافق المطعم" },
   "order.step.preparing": { en: "Kitchen preparing", ar: "المطبخ يحضّر الطلب" },
@@ -97,10 +89,16 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>("en");
+  const [market, setMarketState] = useState<Market>(DEFAULT_MARKET);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY) as Locale | null;
-    if (saved === "en" || saved === "ar") setLocaleState(saved);
+    const savedLocale = localStorage.getItem(LOCALE_KEY) as Locale | null;
+    if (savedLocale === "en" || savedLocale === "ar") setLocaleState(savedLocale);
+    const savedCurrency = localStorage.getItem(MARKET_KEY);
+    if (savedCurrency) {
+      const m = MARKETS.find((m) => m.currency === savedCurrency);
+      if (m) setMarketState(m);
+    }
   }, []);
 
   useEffect(() => {
@@ -110,16 +108,28 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
 
   function setLocale(next: Locale) {
     setLocaleState(next);
-    localStorage.setItem(STORAGE_KEY, next);
+    localStorage.setItem(LOCALE_KEY, next);
+  }
+
+  function setMarket(m: Market) {
+    setMarketState(m);
+    localStorage.setItem(MARKET_KEY, m.currency);
+  }
+
+  function fmt(amount: number) {
+    const threeDecimal = ["KWD", "BHD", "OMR", "JOD"].includes(market.currency);
+    return `${market.currencySymbol} ${amount.toFixed(threeDecimal ? 3 : 2)}`;
   }
 
   function t(key: string) {
     return dictionary[key]?.[locale] ?? key;
   }
 
-  const dir = locale === "ar" ? "rtl" : "ltr";
-
-  return <LocaleContext.Provider value={{ locale, dir, setLocale, t }}>{children}</LocaleContext.Provider>;
+  return (
+    <LocaleContext.Provider value={{ locale, dir: locale === "ar" ? "rtl" : "ltr", setLocale, t, market, setMarket, currency: market.currency, fmt }}>
+      {children}
+    </LocaleContext.Provider>
+  );
 }
 
 export function useLocale() {
@@ -127,5 +137,3 @@ export function useLocale() {
   if (!ctx) throw new Error("useLocale must be used within LocaleProvider");
   return ctx;
 }
-
-
