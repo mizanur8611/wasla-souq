@@ -300,6 +300,7 @@ interface ItemInput {
   nameAr?: string | null;
   description?: string | null;
   price: number;
+  imageUrl?: string | null;
 }
 
 export async function createPartner(opts: {
@@ -350,11 +351,24 @@ export async function addCatalogItem(partnerId: string, item: ItemInput) {
   await ensureSchema();
   const itemId = id();
   await pool.query(
-    `INSERT INTO catalog_items (id, partner_id, category, name, name_ar, description, price, is_available)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,true)`,
-    [itemId, partnerId, item.category ?? "mains", item.name, item.nameAr ?? null, item.description ?? null, item.price]
+    `INSERT INTO catalog_items (id, partner_id, category, name, name_ar, description, price, is_available, image_url)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8)`,
+    [itemId, partnerId, item.category ?? "mains", item.name, item.nameAr ?? null, item.description ?? null, item.price, item.imageUrl ?? null]
   );
   return itemId;
+}
+
+export async function updateCatalogItemImage(itemId: string, partnerId: string, imageUrl: string) {
+  await ensureSchema();
+  await pool.query(
+    "UPDATE catalog_items SET image_url = $1 WHERE id = $2 AND partner_id = $3",
+    [imageUrl, itemId, partnerId]
+  );
+}
+
+export async function updatePartnerImage(partnerId: string, imageUrl: string) {
+  await ensureSchema();
+  await pool.query("UPDATE partners SET image_url = $1 WHERE id = $2", [imageUrl, partnerId]);
 }
 
 export async function listApprovedPartners() {
@@ -677,7 +691,7 @@ export async function updateOrderStatus(orderId: string, newStatus: string) {
 
 export async function updatePartnerProfile(
   partnerId: string,
-  fields: { name?: string; nameAr?: string | null; cuisineTag?: string | null; heroEmoji?: string }
+  fields: { name?: string; nameAr?: string | null; cuisineTag?: string | null; heroEmoji?: string; imageUrl?: string | null }
 ) {
   await ensureSchema();
   await pool.query(
@@ -685,9 +699,10 @@ export async function updatePartnerProfile(
        name = COALESCE($2, name),
        name_ar = COALESCE($3, name_ar),
        cuisine_tag = COALESCE($4, cuisine_tag),
-       hero_emoji = COALESCE($5, hero_emoji)
+       hero_emoji = COALESCE($5, hero_emoji),
+       image_url = CASE WHEN $6::text IS NOT NULL THEN $6 ELSE image_url END
      WHERE id = $1`,
-    [partnerId, fields.name ?? null, fields.nameAr ?? null, fields.cuisineTag ?? null, fields.heroEmoji ?? null]
+    [partnerId, fields.name ?? null, fields.nameAr ?? null, fields.cuisineTag ?? null, fields.heroEmoji ?? null, fields.imageUrl ?? null]
   );
   return getPartnerById(partnerId);
 }

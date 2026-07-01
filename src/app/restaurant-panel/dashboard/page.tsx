@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X, ChefHat, Package, LogOut, RefreshCw, Plus, UtensilsCrossed, Clock, BarChart3, AlertTriangle, Store } from "lucide-react";
+import { Check, X, ChefHat, Package, LogOut, RefreshCw, Plus, UtensilsCrossed, Clock, BarChart3, AlertTriangle, Store, Camera } from "lucide-react";
 
 interface OrderItem {
   name: string;
@@ -327,8 +327,66 @@ function MenuManager() {
   const [category, setCategory] = useState("mains");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
+  const [imageData, setImageData] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [items, setItems] = useState<{ id: string; name: string; price: number; imageUrl?: string | null }[]>([]);
+  const photoRef = useRef<HTMLInputElement>(null);
+
+  // Load existing items to show photo-upload buttons for them
+  useEffect(() => {
+    fetch("/api/restaurant/menu")
+      .then((r) => r.json())
+      .then(setItems)
+      .catch(() => {});
+  }, []);
+
+  function handleNewItemPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = () => {
+        const maxW = 800;
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        setImageData(canvas.toDataURL("image/jpeg", 0.75));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function uploadItemPhoto(itemId: string, file: File) {
+    const img = new Image();
+    const reader = new FileReader();
+    return new Promise<void>((resolve) => {
+      reader.onload = () => {
+        img.onload = async () => {
+          const maxW = 800;
+          const scale = Math.min(1, maxW / img.width);
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+          canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const data = canvas.toDataURL("image/jpeg", 0.75);
+          await fetch(`/api/restaurant/menu/${itemId}/image`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageData: data }),
+          });
+          setItems((prev) => prev.map((it) => (it.id === itemId ? { ...it, imageUrl: data } : it)));
+          resolve();
+        };
+        img.src = reader.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
 
   async function submit() {
     setSubmitting(true);
@@ -337,14 +395,17 @@ function MenuManager() {
       const res = await fetch("/api/restaurant/menu", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, nameAr, category, description, price }),
+        body: JSON.stringify({ name, nameAr, category, description, price, imageData }),
       });
       if (!res.ok) throw new Error((await res.json()).error || "Could not add item");
+      const newItem = await res.json();
+      setItems((prev) => [...prev, { id: newItem.id, name, price: parseFloat(price), imageUrl: imageData }]);
       setMessage("Item added to your menu.");
       setName("");
       setNameAr("");
       setDescription("");
       setPrice("");
+      setImageData(null);
     } catch (e: any) {
       setMessage(e.message);
     } finally {
@@ -374,6 +435,26 @@ function MenuManager() {
         </label>
         <Field label="Description — optional" value={description} onChange={setDescription} placeholder="Short description" />
         <Field label="Price (AED)" value={price} onChange={setPrice} placeholder="e.g. 28" type="number" />
+
+        <div>
+          <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted">Item photo — optional</span>
+          {imageData ? (
+            <div className="relative">
+              <img src={imageData} alt="preview" className="h-28 w-full rounded-xl object-cover" />
+              <button onClick={() => setImageData(null)} className="absolute right-2 top-2 rounded-full bg-ink/70 p-1 text-white">
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => photoRef.current?.click()}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-sand py-3 text-sm font-semibold text-muted"
+            >
+              <Camera size={15} /> Upload photo
+            </button>
+          )}
+          <input ref={photoRef} type="file" accept="image/*" onChange={handleNewItemPhoto} className="hidden" />
+        </div>
       </div>
 
       {message && <p className="mt-3 text-sm font-semibold text-teal">{message}</p>}
@@ -385,6 +466,42 @@ function MenuManager() {
       >
         <Plus size={15} /> {submitting ? "Adding…" : "Add item"}
       </button>
+
+      {items.length > 0 && (
+        <div className="mt-6">
+          <h2 className="mb-3 font-display text-base font-bold text-ink">Menu items — update photos</h2>
+          <div className="space-y-2">
+            {items.map((it) => (
+              <div key={it.id} className="flex items-center gap-3 rounded-2xl bg-paper p-3">
+                {it.imageUrl ? (
+                  <img src={it.imageUrl} alt={it.name} className="h-12 w-12 flex-shrink-0 rounded-xl object-cover" />
+                ) : (
+                  <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-sanddeep text-muted">
+                    <Camera size={18} />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-ink">{it.name}</div>
+                  <div className="text-xs text-muted">AED {it.price.toFixed(2)}</div>
+                </div>
+                <label className="flex-shrink-0 cursor-pointer rounded-xl bg-sanddeep px-3 py-2 text-xs font-semibold text-ink">
+                  <Camera size={13} className="inline me-1" />
+                  {it.imageUrl ? "Change" : "Add photo"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) uploadItemPhoto(it.id, file);
+                    }}
+                  />
+                </label>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -602,11 +719,12 @@ function DisputeCenter() {
 }
 
 function ProfileManager() {
-  const [partner, setPartner] = useState<{ name: string; nameAr: string | null; cuisineTag: string | null; heroEmoji: string } | null>(
-    null
-  );
+  const [partner, setPartner] = useState<{ name: string; nameAr: string | null; cuisineTag: string | null; heroEmoji: string; heroImageUrl?: string | null } | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoMsg, setPhotoMsg] = useState<string | null>(null);
+  const photoRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/restaurant/profile")
@@ -630,11 +748,66 @@ function ProfileManager() {
     }
   }
 
+  function handlePhotoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    setPhotoMsg(null);
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = async () => {
+        const maxW = 800;
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const imageData = canvas.toDataURL("image/jpeg", 0.75);
+        try {
+          const res = await fetch("/api/restaurant/image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageData }),
+          });
+          if (res.ok) {
+            setPartner((p) => p ? { ...p, heroImageUrl: imageData } : p);
+            setPhotoMsg("Photo updated!");
+          }
+        } catch {
+          setPhotoMsg("Upload failed — try again.");
+        } finally {
+          setUploadingPhoto(false);
+        }
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  }
+
   if (!partner) return <p className="text-sm text-muted">Loading…</p>;
 
   return (
     <div>
       <h2 className="mb-4 font-display text-base font-bold text-ink">Restaurant Profile</h2>
+
+      {/* Photo upload */}
+      <div className="mb-4 rounded-2xl bg-paper p-4">
+        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Restaurant photo</div>
+        {partner.heroImageUrl && (
+          <img src={partner.heroImageUrl} alt="Restaurant" className="mb-3 h-32 w-full rounded-xl object-cover" />
+        )}
+        <button
+          onClick={() => photoRef.current?.click()}
+          disabled={uploadingPhoto}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-sand py-3 text-sm font-semibold text-muted disabled:opacity-60"
+        >
+          <Camera size={16} /> {uploadingPhoto ? "Uploading…" : partner.heroImageUrl ? "Change photo" : "Upload photo"}
+        </button>
+        <input ref={photoRef} type="file" accept="image/*" onChange={handlePhotoFile} className="hidden" />
+        {photoMsg && <p className="mt-2 text-xs font-semibold text-teal">{photoMsg}</p>}
+      </div>
+
       <div className="space-y-3 rounded-2xl bg-paper p-4">
         <label className="block">
           <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-muted">Name (English)</span>
