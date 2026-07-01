@@ -55,7 +55,7 @@ export default function Header() {
                         market.currency === m.currency ? "font-bold text-teal" : "text-ink"
                       }`}
                     >
-                      <span className="text-base">{m.flag}</span>
+                      <span className="text-xl leading-none">{m.flag}</span>
                       <div className="text-start">
                         <div className="leading-none">{locale === "ar" ? m.countryAr : m.country}</div>
                         <div className="text-[11px] text-muted">{m.currency} · {locale === "ar" ? m.cityAr : m.city}</div>
