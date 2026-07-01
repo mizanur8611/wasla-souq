@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { ShoppingCart, Languages, History, User, ChevronDown } from "lucide-react";
+import { ShoppingCart, Languages, History, User, ChevronDown, MapPin } from "lucide-react";
 import { useCart } from "./CartContext";
 import { useLocale } from "./LocaleContext";
 import { MARKETS } from "@/lib/pricing";
@@ -39,7 +39,7 @@ export default function Header() {
               onClick={() => setShowMarkets((s) => !s)}
               className="flex items-center gap-1 text-sm font-medium text-ink-soft"
             >
-              <span className="text-base">{market.flag}</span>
+              <MapPin size={15} />
               <span className="hidden sm:inline">{locale === "ar" ? market.cityAr : market.city}</span>
               <ChevronDown size={13} className="text-muted" />
             </button>
