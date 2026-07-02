@@ -10,6 +10,7 @@
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import type { ReactNode } from "react";
 
 export interface MapPin {
   lat: number;
@@ -17,6 +18,7 @@ export interface MapPin {
   emoji: string;
   label?: string;
   color?: string;
+  popupContent?: ReactNode;
 }
 
 function emojiIcon(emoji: string, color: string = "#0B2230") {
@@ -67,7 +69,7 @@ export default function LiveMap({
         )}
         {pins.map((p, i) => (
           <Marker key={i} position={[p.lat, p.lng]} icon={emojiIcon(p.emoji, p.color)}>
-            {p.label && <Popup>{p.label}</Popup>}
+            {p.popupContent ? <Popup minWidth={200}>{p.popupContent}</Popup> : p.label && <Popup>{p.label}</Popup>}
           </Marker>
         ))}
       </MapContainer>

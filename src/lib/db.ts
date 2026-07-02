@@ -13,6 +13,7 @@
 
 import { Pool } from "pg";
 import { randomUUID } from "node:crypto";
+import { MARKETS } from "./pricing";
 
 // Render's managed Postgres requires SSL for external connections; a local or
 // Docker Postgres during development normally has no cert set up at all. NODE_ENV alone
@@ -251,9 +252,45 @@ function ensureSchema(): Promise<void> {
         deliveries_count INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
-    `).then(() => undefined);
+    `)
+      .then(() => backfillPartnerCoordinates())
+      .then(() => undefined);
   }
   return schemaReady;
+}
+
+// Phase 2 addition: createPartner() now stores lat/lng directly (see below), but any
+// restaurant created BEFORE that fix — i.e. most of the multi-city seed data, since only
+// Dubai/Riyadh had been seeded when the bug was fixed — is stuck with lat/lng = NULL and
+// would be invisible on the "restaurants near me" map. This backfills those rows using
+// their city's centre point (from pricing.ts) plus a small deterministic offset per
+// restaurant (derived from its id) so pins fan out instead of stacking exactly on top of
+// one another. It's an approximation, not the restaurant's real address — fine for a demo
+// map, not something to rely on for actual turn-by-turn distance.
+async function backfillPartnerCoordinates() {
+  const cityCenters = new Map<string, { lat: number; lng: number }>();
+  for (const market of MARKETS) {
+    for (const c of market.cities) cityCenters.set(c.name, { lat: c.lat, lng: c.lng });
+  }
+
+  const result = await pool.query(
+    `SELECT p.id, c.name AS city_name FROM partners p
+     JOIN cities c ON c.id = p.city_id
+     WHERE p.lat IS NULL OR p.lng IS NULL`
+  );
+  for (const row of result.rows) {
+    const center = cityCenters.get(row.city_name);
+    if (!center) continue;
+    // Deterministic jitter from the UUID so re-running this never moves a pin once set.
+    const hash = [...(row.id as string)].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    const jitterLat = (((hash % 100) / 100) - 0.5) * 0.02; // ~±1.1km
+    const jitterLng = ((((hash >> 3) % 100) / 100) - 0.5) * 0.02;
+    await pool.query("UPDATE partners SET lat = $1, lng = $2 WHERE id = $3", [
+      center.lat + jitterLat,
+      center.lng + jitterLng,
+      row.id,
+    ]);
+  }
 }
 
 const id = () => randomUUID();
@@ -313,13 +350,15 @@ export async function createPartner(opts: {
   etaMinsLow?: number;
   etaMinsHigh?: number;
   cityId: string;
+  lat?: number | null;
+  lng?: number | null;
   items: ItemInput[];
 }) {
   await ensureSchema();
   const partnerId = id();
   await pool.query(
-    `INSERT INTO partners (id, partner_type, name, name_ar, cuisine_tag, city_id, halal_verified, status, rating_avg, eta_mins_low, eta_mins_high, hero_emoji)
-     VALUES ($1,'restaurant',$2,$3,$4,$5,$6,'approved',$7,$8,$9,$10)`,
+    `INSERT INTO partners (id, partner_type, name, name_ar, cuisine_tag, city_id, halal_verified, status, rating_avg, eta_mins_low, eta_mins_high, hero_emoji, lat, lng)
+     VALUES ($1,'restaurant',$2,$3,$4,$5,$6,'approved',$7,$8,$9,$10,$11,$12)`,
     [
       partnerId,
       opts.name,
@@ -331,6 +370,8 @@ export async function createPartner(opts: {
       opts.etaMinsLow ?? 20,
       opts.etaMinsHigh ?? 35,
       opts.heroEmoji ?? "🍽️",
+      opts.lat ?? null,
+      opts.lng ?? null,
     ]
   );
 
@@ -373,6 +414,7 @@ export async function updatePartnerImage(partnerId: string, imageUrl: string) {
 
 export async function listApprovedPartners(cityName?: string) {
   await ensureSchema();
+  let rows: any[];
   if (cityName) {
     const result = await pool.query(
       `SELECT p.* FROM partners p
@@ -381,10 +423,37 @@ export async function listApprovedPartners(cityName?: string) {
        ORDER BY p.rating_avg DESC`,
       [cityName]
     );
-    return result.rows.map(toPartnerShape);
+    rows = result.rows;
+  } else {
+    const result = await pool.query("SELECT * FROM partners WHERE status = 'approved' ORDER BY rating_avg DESC");
+    rows = result.rows;
   }
-  const result = await pool.query("SELECT * FROM partners WHERE status = 'approved' ORDER BY rating_avg DESC");
-  return result.rows.map(toPartnerShape);
+
+  const previews = await getMenuPreviews(rows.map((r) => r.id));
+  return rows.map((r) => ({ ...toPartnerShape(r), menuPreview: previews.get(r.id) ?? [] }));
+}
+
+// Small (max 4) menu preview per partner, for restaurant cards / map popups where showing
+// the full menu would be too much — just enough to answer "what do they even serve?" at a
+// glance. One extra query batched across all requested partner ids rather than N+1.
+async function getMenuPreviews(partnerIds: string[]): Promise<Map<string, { name: string; nameAr: string | null; price: number }[]>> {
+  const map = new Map<string, { name: string; nameAr: string | null; price: number }[]>();
+  if (partnerIds.length === 0) return map;
+  const result = await pool.query(
+    `SELECT partner_id, name, name_ar, price FROM (
+       SELECT partner_id, name, name_ar, price,
+              ROW_NUMBER() OVER (PARTITION BY partner_id ORDER BY category, name) AS rn
+       FROM catalog_items
+       WHERE partner_id = ANY($1) AND is_available = true
+     ) sub WHERE rn <= 4`,
+    [partnerIds]
+  );
+  for (const row of result.rows) {
+    const list = map.get(row.partner_id) ?? [];
+    list.push({ name: row.name, nameAr: row.name_ar, price: row.price });
+    map.set(row.partner_id, list);
+  }
+  return map;
 }
 
 export async function getPartnerById(partnerId: string) {

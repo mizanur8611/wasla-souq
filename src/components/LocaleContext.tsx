@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { MARKETS, Market, DEFAULT_MARKET, DEFAULT_CITY, CityEntry } from "@/lib/pricing";
+import { MARKETS, Market, DEFAULT_MARKET, DEFAULT_CITY, CityEntry, FLAT_DELIVERY_FEE } from "@/lib/pricing";
 
 export type Locale = "en" | "ar";
 
@@ -16,11 +16,38 @@ interface LocaleContextValue {
   setCity: (c: CityEntry) => void;
   currency: string;
   fmt: (amount: number) => string;
+  deliveryFee: number;
+  locating: boolean;
+  locationSource: "gps" | "cached" | "default";
+  userLocation: { lat: number; lng: number } | null;
 }
 
 const LOCALE_KEY = "wasla-souq-locale";
 const MARKET_KEY = "wasla-souq-market";
 const CITY_KEY = "wasla-souq-city";
+
+// Haversine distance in km between two lat/lng points
+export function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// Find the nearest city (and its market) across all supported markets
+function findNearestCity(lat: number, lng: number): { market: Market; city: CityEntry } {
+  let best: { market: Market; city: CityEntry; dist: number } | null = null;
+  for (const m of MARKETS) {
+    for (const c of m.cities) {
+      const d = distanceKm(lat, lng, c.lat, c.lng);
+      if (!best || d < best.dist) best = { market: m, city: c, dist: d };
+    }
+  }
+  return best ? { market: best.market, city: best.city } : { market: DEFAULT_MARKET, city: DEFAULT_CITY };
+}
 
 const dictionary: Record<string, { en: string; ar: string }> = {
   "header.cart": { en: "Cart", ar: "السلة" },
@@ -94,10 +121,16 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>("en");
   const [market, setMarketState] = useState<Market>(DEFAULT_MARKET);
   const [city, setCityState] = useState<CityEntry>(DEFAULT_CITY);
+  const [locating, setLocating] = useState(true);
+  const [locationSource, setLocationSource] = useState<"gps" | "cached" | "default">("default");
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     const savedLocale = localStorage.getItem(LOCALE_KEY) as Locale | null;
     if (savedLocale === "en" || savedLocale === "ar") setLocaleState(savedLocale);
+
+    // 1. Show a cached market/city immediately (avoids a flash of the default
+    //    while we wait on the (slower) GPS permission prompt / fix).
     const savedCurrency = localStorage.getItem(MARKET_KEY);
     if (savedCurrency) {
       const m = MARKETS.find((m) => m.currency === savedCurrency);
@@ -106,7 +139,36 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
         const savedCity = localStorage.getItem(CITY_KEY);
         const c = m.cities.find((c) => c.name === savedCity) ?? m.cities[0];
         setCityState(c);
+        setLocationSource("cached");
       }
+    }
+
+    // 2. Auto-detect via browser GPS, like Talabat/HungerStation — no manual
+    //    country/city picker. Silently falls back to cached/default on
+    //    denial, timeout, or unsupported browsers.
+    if (typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { market: nearestMarket, city: nearestCity } = findNearestCity(
+            pos.coords.latitude,
+            pos.coords.longitude
+          );
+          setMarketState(nearestMarket);
+          setCityState(nearestCity);
+          setLocationSource("gps");
+          setLocating(false);
+          setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          localStorage.setItem(MARKET_KEY, nearestMarket.currency);
+          localStorage.setItem(CITY_KEY, nearestCity.name);
+        },
+        () => {
+          // Permission denied / unavailable — keep cached or default value.
+          setLocating(false);
+        },
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 10 * 60 * 1000 }
+      );
+    } else {
+      setLocating(false);
     }
   }, []);
 
@@ -143,7 +205,24 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <LocaleContext.Provider value={{ locale, dir: locale === "ar" ? "rtl" : "ltr", setLocale, t, market, setMarket, city, setCity, currency: market.currency, fmt }}>
+    <LocaleContext.Provider
+      value={{
+        locale,
+        dir: locale === "ar" ? "rtl" : "ltr",
+        setLocale,
+        t,
+        market,
+        setMarket,
+        city,
+        setCity,
+        currency: market.currency,
+        fmt,
+        deliveryFee: FLAT_DELIVERY_FEE[market.currency] ?? FLAT_DELIVERY_FEE.AED,
+        locating,
+        locationSource,
+        userLocation,
+      }}
+    >
       {children}
     </LocaleContext.Provider>
   );
