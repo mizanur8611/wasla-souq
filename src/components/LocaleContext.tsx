@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { MARKETS, Market, DEFAULT_MARKET } from "@/lib/pricing";
+import { MARKETS, Market, DEFAULT_MARKET, DEFAULT_CITY, CityEntry } from "@/lib/pricing";
 
 export type Locale = "en" | "ar";
 
@@ -12,12 +12,15 @@ interface LocaleContextValue {
   t: (key: string) => string;
   market: Market;
   setMarket: (m: Market) => void;
+  city: CityEntry;
+  setCity: (c: CityEntry) => void;
   currency: string;
   fmt: (amount: number) => string;
 }
 
 const LOCALE_KEY = "wasla-souq-locale";
 const MARKET_KEY = "wasla-souq-market";
+const CITY_KEY = "wasla-souq-city";
 
 const dictionary: Record<string, { en: string; ar: string }> = {
   "header.cart": { en: "Cart", ar: "السلة" },
@@ -90,6 +93,7 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>("en");
   const [market, setMarketState] = useState<Market>(DEFAULT_MARKET);
+  const [city, setCityState] = useState<CityEntry>(DEFAULT_CITY);
 
   useEffect(() => {
     const savedLocale = localStorage.getItem(LOCALE_KEY) as Locale | null;
@@ -97,7 +101,12 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     const savedCurrency = localStorage.getItem(MARKET_KEY);
     if (savedCurrency) {
       const m = MARKETS.find((m) => m.currency === savedCurrency);
-      if (m) setMarketState(m);
+      if (m) {
+        setMarketState(m);
+        const savedCity = localStorage.getItem(CITY_KEY);
+        const c = m.cities.find((c) => c.name === savedCity) ?? m.cities[0];
+        setCityState(c);
+      }
     }
   }, []);
 
@@ -114,6 +123,14 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   function setMarket(m: Market) {
     setMarketState(m);
     localStorage.setItem(MARKET_KEY, m.currency);
+    const defaultCity = m.cities[0];
+    setCityState(defaultCity);
+    localStorage.setItem(CITY_KEY, defaultCity.name);
+  }
+
+  function setCity(c: CityEntry) {
+    setCityState(c);
+    localStorage.setItem(CITY_KEY, c.name);
   }
 
   function fmt(amount: number) {
@@ -126,7 +143,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <LocaleContext.Provider value={{ locale, dir: locale === "ar" ? "rtl" : "ltr", setLocale, t, market, setMarket, currency: market.currency, fmt }}>
+    <LocaleContext.Provider value={{ locale, dir: locale === "ar" ? "rtl" : "ltr", setLocale, t, market, setMarket, city, setCity, currency: market.currency, fmt }}>
       {children}
     </LocaleContext.Provider>
   );
@@ -137,3 +154,4 @@ export function useLocale() {
   if (!ctx) throw new Error("useLocale must be used within LocaleProvider");
   return ctx;
 }
+

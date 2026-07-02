@@ -4,8 +4,8 @@ import { ShieldCheck } from "lucide-react";
 import { useLocale } from "./LocaleContext";
 
 export default function HomeIntro({ hasPartners }: { hasPartners: boolean }) {
-  const { t, locale, market } = useLocale();
-  const cityName = locale === "ar" ? market.cityAr : market.city;
+  const { t, locale, market, city } = useLocale();
+  const cityName = locale === "ar" ? city.nameAr : city.name;
 
   return (
     <>

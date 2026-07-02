@@ -19,16 +19,16 @@ interface Partner {
 }
 
 export default function HomePage() {
-  const { market } = useLocale();
+  const { market, city } = useLocale();
   const [partners, setPartners] = useState<Partner[] | null>(null);
 
   useEffect(() => {
     setPartners(null);
-    fetch(`/api/partners?city=${encodeURIComponent(market.city)}`)
+    fetch(`/api/partners?city=${encodeURIComponent(city.name)}`)
       .then((r) => r.json())
       .then(setPartners)
       .catch(() => setPartners([]));
-  }, [market.city]);
+  }, [city.name]);
 
   return (
     <div>
@@ -42,7 +42,7 @@ export default function HomePage() {
         </div>
       ) : partners.length === 0 ? (
         <div className="rounded-2xl bg-paper p-6 text-center text-sm text-muted">
-          No restaurants yet in {market.city} — coming soon! 🚀
+          No restaurants yet in {city.name} — coming soon! 🚀
         </div>
       ) : (
         <div className="space-y-2">
