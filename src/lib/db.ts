@@ -371,8 +371,18 @@ export async function updatePartnerImage(partnerId: string, imageUrl: string) {
   await pool.query("UPDATE partners SET image_url = $1 WHERE id = $2", [imageUrl, partnerId]);
 }
 
-export async function listApprovedPartners() {
+export async function listApprovedPartners(cityName?: string) {
   await ensureSchema();
+  if (cityName) {
+    const result = await pool.query(
+      `SELECT p.* FROM partners p
+       JOIN cities c ON c.id = p.city_id
+       WHERE p.status = 'approved' AND c.name = $1
+       ORDER BY p.rating_avg DESC`,
+      [cityName]
+    );
+    return result.rows.map(toPartnerShape);
+  }
   const result = await pool.query("SELECT * FROM partners WHERE status = 'approved' ORDER BY rating_avg DESC");
   return result.rows.map(toPartnerShape);
 }
